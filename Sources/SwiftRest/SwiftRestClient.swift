@@ -13,18 +13,18 @@ public final class SwiftRestClient {
         self.url = url
     }
 
-    public func executeAsync<T: Decodable>(_ httpRequest: HTTPRequest) async throws -> HttpResponse<T> {
+    public func executeAsync<T: Decodable>(_ httpRequest: SwiftRestRequest) async throws -> SwiftRestResponse<T> {
         
-        guard let baseURL = URL(string: url) else { throw HTTPClientError.invalidBaseURL(url) }
+        guard let baseURL = URL(string: url) else { throw SwiftRestClientError.invalidBaseURL(url) }
         var url = baseURL.appendingPathComponent(httpRequest.path)
 
         if let parameters = httpRequest.parameters, !parameters.isEmpty {
             guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
-                throw HTTPClientError.invalidURLComponents
+                throw SwiftRestClientError.invalidURLComponents
             }
             components.queryItems = parameters.map { URLQueryItem(name: $0.key, value: $0.value) }
             guard let finalURL = components.url else {
-                throw HTTPClientError.invalidFinalURL
+                throw SwiftRestClientError.invalidFinalURL
             }
             url = finalURL
         }
@@ -48,26 +48,26 @@ public final class SwiftRestClient {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw HTTPClientError.invalidHTTPResponse
+            throw SwiftRestClientError.invalidHTTPResponse
         }
 
         let statusCode = httpResponse.statusCode
 
         guard (200...299).contains(statusCode) else {
-            return HttpResponse(statusCode: statusCode)
+            return SwiftRestResponse(statusCode: statusCode)
         }
 
         let contentType: String? = httpResponse.value(forHTTPHeaderField: "Content-Type")
          
         guard let result = String(data: data, encoding: .utf8), !result.isEmpty else {
-            return HttpResponse(statusCode: statusCode)
+            return SwiftRestResponse(statusCode: statusCode)
         }
 
         if let contentType = contentType, contentType.contains("application/json") {
             let payload = try Json.parse(data: result) as T
-            return HttpResponse(statusCode: statusCode, data: payload, rawValue: result)
+            return SwiftRestResponse(statusCode: statusCode, data: payload, rawValue: result)
         }
 
-        return HttpResponse(statusCode: statusCode)
+        return SwiftRestResponse(statusCode: statusCode)
     }
 }
