@@ -38,7 +38,7 @@ public actor SwiftRestClient {
             }
         }
 
-        if (httpRequest.method == .POST || httpRequest.method == .PUT),
+        if (httpRequest.method == .post || httpRequest.method == .put),
            let jsonBody = httpRequest.jsonBody {
             request.httpBody = jsonBody.data(using: .utf8)
             if httpRequest.headers?["Content-Type"] == nil {
