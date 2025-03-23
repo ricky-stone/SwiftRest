@@ -7,11 +7,11 @@ import Foundation
 
 public struct SwiftRestRequest: Sendable {
     
-    private(set) var path: String
-    private(set) var method: HTTPMethod
-    private(set) var headers: [String: String]?
-    private(set) var parameters: [String: String]?
-    private(set) var jsonBody: String?
+    public private(set) var path: String
+    public private(set) var method: HTTPMethod
+    public private(set) var headers: [String: String]?
+    public private(set) var parameters: [String: String]?
+    public private(set) var jsonBody: String?
     
     public init(path: String, method: HTTPMethod) {
         self.path = path
