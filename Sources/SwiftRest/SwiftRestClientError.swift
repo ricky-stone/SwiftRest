@@ -5,7 +5,7 @@
 
 import Foundation
 
-public enum SwiftRestClientError: Error {
+public enum SwiftRestClientError: Error, Sendable {
     case invalidBaseURL(String)
     case invalidURLComponents
     case invalidFinalURL

@@ -5,7 +5,7 @@
 
 import Foundation
 
-public struct SwiftRestRequest {
+public struct SwiftRestRequest: Sendable {
     
     private(set) var path: String
     private(set) var method: HTTPMethod
