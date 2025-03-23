@@ -5,7 +5,7 @@
 
 import Foundation
 
-public final class SwiftRestClient {
+public actor SwiftRestClient {
 
     private let url: String
 

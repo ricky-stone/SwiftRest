@@ -5,7 +5,7 @@
 
 import Foundation
 
-public final class SwiftRestResponse<T: Decodable> {
+public struct SwiftRestResponse<T: Decodable> {
     
     private(set) var statusCode: Int
     private(set) var data: T?

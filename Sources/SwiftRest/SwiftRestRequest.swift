@@ -5,7 +5,7 @@
 
 import Foundation
 
-public final class SwiftRestRequest {
+public struct SwiftRestRequest {
     
     private(set) var path: String
     private(set) var method: HTTPMethod
@@ -18,17 +18,17 @@ public final class SwiftRestRequest {
         self.method = method
     }
     
-    public func addHeader(_ key: String, _ value: String) {
+    public mutating func addHeader(_ key: String, _ value: String) {
         if headers == nil { headers = [:] }
         headers?[key] = value
     }
     
-    public func addParameter(_ key: String, _ value: String) {
+    public mutating func addParameter(_ key: String, _ value: String) {
         if parameters == nil { parameters = [:] }
         parameters?[key] = value
     }
     
-    public func addJsonBody<T: Encodable>(_ object: T) throws {
+    public mutating func addJsonBody<T: Encodable>(_ object: T) throws {
         self.jsonBody = try Json.toString(object: object)
     }
 }
