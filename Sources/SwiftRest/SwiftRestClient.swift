@@ -6,18 +6,18 @@
 import Foundation
 
 public actor SwiftRestClient {
-
+    
     private let url: String
-
+    
     public init(url: String) {
         self.url = url
     }
-
-    public func executeAsync<T: Decodable>(_ httpRequest: SwiftRestRequest) async throws -> SwiftRestResponse<T> {
+    
+    public func executeAsyncWithResponse<T: Decodable>(_ httpRequest: SwiftRestRequest) async throws -> SwiftRestResponse<T> {
         
         guard let baseURL = URL(string: url) else { throw SwiftRestClientError.invalidBaseURL(url) }
         var url = baseURL.appendingPathComponent(httpRequest.path)
-
+        
         if let parameters = httpRequest.parameters, !parameters.isEmpty {
             guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
                 throw SwiftRestClientError.invalidURLComponents
@@ -28,16 +28,16 @@ public actor SwiftRestClient {
             }
             url = finalURL
         }
-
+        
         var request = URLRequest(url: url)
         request.httpMethod = httpRequest.method.rawValue
-
+        
         if let headers = httpRequest.headers {
             for (key, value) in headers {
                 request.addValue(value, forHTTPHeaderField: key)
             }
         }
-
+        
         if (httpRequest.method == .post || httpRequest.method == .put),
            let jsonBody = httpRequest.jsonBody {
             request.httpBody = jsonBody.data(using: .utf8)
@@ -45,29 +45,39 @@ public actor SwiftRestClient {
                 request.addValue("application/json", forHTTPHeaderField: "Content-Type")
             }
         }
-
+        
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SwiftRestClientError.invalidHTTPResponse
         }
-
+        
+        let responseHeaders = httpResponse.allHeaderFields as? [String: String]
         let statusCode = httpResponse.statusCode
-
+        
         guard (200...299).contains(statusCode) else {
-            return SwiftRestResponse(statusCode: statusCode)
+            return SwiftRestResponse(statusCode: statusCode, headers: responseHeaders)
         }
-
+        
         let contentType: String? = httpResponse.value(forHTTPHeaderField: "Content-Type")
-         
+        
         guard let result = String(data: data, encoding: .utf8), !result.isEmpty else {
-            return SwiftRestResponse(statusCode: statusCode)
+            return SwiftRestResponse(statusCode: statusCode, headers: responseHeaders)
         }
-
+        
         if let contentType = contentType, contentType.contains("application/json") {
             let payload = try Json.parse(data: result) as T
-            return SwiftRestResponse(statusCode: statusCode, data: payload, rawValue: result)
+            return SwiftRestResponse(statusCode: statusCode, data: payload, rawValue: result, headers: responseHeaders)
         }
-
-        return SwiftRestResponse(statusCode: statusCode)
+        
+        return SwiftRestResponse(statusCode: statusCode, headers: responseHeaders)
     }
+    
+    public func executeAsyncWithoutResponse(_ request: SwiftRestRequest) async throws {
+        let response: SwiftRestResponse<NoContent> = try await executeAsyncWithResponse(request)
+        guard (200...299).contains(response.statusCode) else {
+            throw SwiftRestClientError.invalidHTTPResponse
+        }
+    }
+    
+    private struct NoContent: Decodable, Sendable {}
 }
