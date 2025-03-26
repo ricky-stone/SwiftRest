@@ -19,8 +19,7 @@ public actor SwiftRestClient {
     /// Initializes a new REST client with the specified base URL.
     ///
     /// - Parameter url: The base URL as a string.
-    /// - Throws: `SwiftRestClientError.invalidBaseURL` if the URL is invalid.
-    public init(_ url: String) throws {
+    public init(_ url: String) {
         self.url = url
     }
     
