@@ -51,16 +51,16 @@ Create a SwiftRestRequest instance by specifying the endpoint path and HTTP meth
 // Create a GET request to the "api/v1/users" endpoint
 var request = SwiftRestRequest(path: "api/v1/users", method: .get)
 
-// Add a custom header
+// Optionally add a custom header
 request.addHeader("Custom-Header", "Value")
 
-// Add URL parameters
+// Optionally add URL parameters
 request.addParameter("page", "1")
 
 // Optionally add an authorization token (will be sent as a Bearer token)
 request.addAuthToken("your_auth_token_here")
 
-// Configure retry behavior (3 attempts with a 0.5-second delay between retries)
+// Optionally configure retry behavior (3 attempts with a 0.5-second delay between retries)
 request.configureRetries(maxRetries: 3, retryDelay: 0.5)
 ```
 
@@ -69,19 +69,7 @@ Initializing the REST Client
 Initialize the SwiftRestClient with your base URL. You can also specify base headers that apply to every request made through this client.
 
 ```swift
-do {
-    let client = try SwiftRestClient(url: "https://api.example.com")
-    
-    // Set client-level base headers; these will be merged with request-specific headers.
-    client.baseHeaders = [
-        "Accept": "application/json",
-        "User-Agent": "SwiftRest/1.0"
-    ]
-    
-    // Use the client to execute requests...
-} catch {
-    print("Error initializing client: \(error)")
-}
+let client = SwiftRestClient("https://api.example.com")
 ```
 
 Executing a Request
@@ -100,7 +88,6 @@ struct User: Decodable, Sendable {
 }
 
 // Execute the request and decode the response.
-Task {
     do {
         let response: SwiftRestResponse<User> = try await client.executeAsyncWithResponse(request)
         if response.isSuccess, let user = response.data {
@@ -111,7 +98,6 @@ Task {
     } catch {
         print("Error executing request: \(error)")
     }
-}
 ```
 
 2. Executing without a Response
@@ -119,14 +105,12 @@ Task {
 For requests that do not expect any response payload.
 
 ```swift
-Task {
     do {
         try await client.executeAsyncWithoutResponse(request)
         print("Request executed successfully")
     } catch {
         print("Error executing request: \(error)")
     }
-}
 ```
 
 Error Handling

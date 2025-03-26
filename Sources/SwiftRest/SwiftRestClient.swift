@@ -9,7 +9,7 @@ import Foundation
 public actor SwiftRestClient {
     
     /// The base URL for all requests.
-    private let baseURL: URL
+    private let url: String
     
     /// Base headers that are applied to every request.
     ///
@@ -20,11 +20,8 @@ public actor SwiftRestClient {
     ///
     /// - Parameter url: The base URL as a string.
     /// - Throws: `SwiftRestClientError.invalidBaseURL` if the URL is invalid.
-    public init(url: String) throws {
-        guard let baseURL = URL(string: url) else {
-            throw SwiftRestClientError.invalidBaseURL(url)
-        }
-        self.baseURL = baseURL
+    public init(_ url: String) throws {
+        self.url = url
     }
     
     /// Executes a REST request and decodes the response to the specified type.
@@ -39,6 +36,10 @@ public actor SwiftRestClient {
         let retryDelay = httpRequest.retryDelay
         var attempt = 0
         var lastError: Error?
+        
+        guard let baseURL = URL(string: url) else {
+            throw SwiftRestClientError.invalidBaseURL(url)
+        }
         
         // Nested helper that captures the generic type T.
         func performRequest() async throws -> SwiftRestResponse<T> {
