@@ -14,13 +14,19 @@ public actor SwiftRestClient {
     /// Base headers that are applied to every request.
     ///
     /// These headers are merged with the request-specific headers; in case of conflicts, the request's headers take precedence.
-    public var baseHeaders: [String: String] = [:]
+    public var baseHeaders: [String: String]
     
-    /// Initializes a new REST client with the specified base URL.
+    /// Initializes a new REST client with the specified base URL and optional base headers.
     ///
-    /// - Parameter url: The base URL as a string.
-    public init(_ url: String) {
+    /// The provided base headers will be applied to every request made by this client, merging with any request-specific headers.
+    /// In case of a conflict, the request-specific header values will override the base headers.
+    ///
+    /// - Parameters:
+    ///   - url: The base URL as a string.
+    ///   - baseHeaders: A dictionary of header keys and values to be applied to each request.
+    public init(_ url: String, baseHeaders: [String: String] = [:]) {
         self.url = url
+        self.baseHeaders = baseHeaders
     }
     
     /// Executes a REST request and decodes the response to the specified type.
