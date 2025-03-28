@@ -46,108 +46,14 @@ public actor SwiftRestClient {
             throw SwiftRestClientError.invalidBaseURL(url)
         }
         
-        // Nested helper that captures the generic type T.
-        func performRequest() async throws -> SwiftRestResponse<T> {
-            var requestURL = baseURL.appendingPathComponent(httpRequest.path)
-            
-            // Append query parameters if available.
-            if let parameters = httpRequest.parameters, !parameters.isEmpty {
-                guard var components = URLComponents(url: requestURL, resolvingAgainstBaseURL: false) else {
-                    throw SwiftRestClientError.invalidURLComponents
-                }
-                components.queryItems = parameters.map { URLQueryItem(name: $0.key, value: $0.value) }
-                guard let finalURL = components.url else {
-                    throw SwiftRestClientError.invalidFinalURL
-                }
-                requestURL = finalURL
-            }
-            
-            // Build the URLRequest.
-            var request = URLRequest(url: requestURL)
-            request.httpMethod = httpRequest.method.rawValue
-            
-            // Add client-level base headers.
-            for (key, value) in baseHeaders {
-                request.addValue(value, forHTTPHeaderField: key)
-            }
-            
-            // Add request-specific headers.
-            if let headers = httpRequest.headers {
-                for (key, value) in headers {
-                    request.addValue(value, forHTTPHeaderField: key)
-                }
-            }
-            
-            // If an authorization token is provided, add it as a Bearer token.
-            if let token = httpRequest.authToken {
-                request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            }
-            
-            // Set the JSON body for POST/PUT requests.
-            if (httpRequest.method == .post || httpRequest.method == .put),
-               let jsonBody = httpRequest.jsonBody {
-                request.httpBody = jsonBody.data(using: .utf8)
-                // Set default content type if not provided.
-                if httpRequest.headers?["Content-Type"] == nil {
-                    request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-                }
-            }
-            
-            let startTime = Date()
-            let (data, urlResponse) = try await URLSession.shared.data(for: request)
-            let responseTime = Date().timeIntervalSince(startTime)
-            
-            guard let httpResponse = urlResponse as? HTTPURLResponse else {
-                throw SwiftRestClientError.invalidHTTPResponse
-            }
-            
-            let responseHeaders = httpResponse.allHeaderFields as? [String: String]
-            let statusCode = httpResponse.statusCode
-            let mimeType = httpResponse.mimeType
-            
-            var response = SwiftRestResponse<T>(
-                statusCode: statusCode,
-                headers: responseHeaders,
-                responseTime: responseTime,
-                finalURL: httpResponse.url,
-                mimeType: mimeType
-            )
-            
-            // If the response status code is not successful, return early.
-            guard (200...299).contains(statusCode) else {
-                return response
-            }
-            
-            // Process and decode the response body if available.
-            guard !data.isEmpty else {
-                return response
-            }
-            
-            if let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type"),
-               contentType.contains("application/json") {
-                // Use the default JSON decoding via the Json helper.
-                guard let bodyString = String(data: data, encoding: .utf8), !bodyString.isEmpty else {
-                    return response
-                }
-                let parsedPayload = try Json.parse(data: bodyString) as T
-                response = SwiftRestResponse(
-                    statusCode: statusCode,
-                    data: parsedPayload,
-                    rawValue: String(data: data, encoding: .utf8),
-                    headers: responseHeaders,
-                    responseTime: responseTime,
-                    finalURL: httpResponse.url,
-                    mimeType: mimeType
-                )
-            }
-            
-            return response
-        }
-        
-        // Retry loop.
         while attempt <= maxRetries {
             do {
-                let response = try await performRequest()
+                let requestURL = try buildRequestURL(for: httpRequest, baseURL: baseURL)
+                let request = buildURLRequest(for: httpRequest, requestURL: requestURL)
+                let startTime = Date()
+                let (data, urlResponse) = try await URLSession.shared.data(for: request)
+                let response = try processResponse(data, urlResponse, startTime, type: T.self)
+                
                 if (200...299).contains(response.statusCode) {
                     return response
                 } else {
@@ -179,8 +85,106 @@ public actor SwiftRestClient {
         }
     }
     
+    // MARK: - Private Helper Methods
+    
+    /// Builds the request URL by appending the path and query parameters.
+    private func buildRequestURL(for httpRequest: SwiftRestRequest, baseURL: URL) throws -> URL {
+        var requestURL = baseURL.appendingPathComponent(httpRequest.path)
+        
+        if let parameters = httpRequest.parameters, !parameters.isEmpty {
+            guard var components = URLComponents(url: requestURL, resolvingAgainstBaseURL: false) else {
+                throw SwiftRestClientError.invalidURLComponents
+            }
+            components.queryItems = parameters.map { URLQueryItem(name: $0.key, value: $0.value) }
+            guard let finalURL = components.url else {
+                throw SwiftRestClientError.invalidFinalURL
+            }
+            requestURL = finalURL
+        }
+        
+        return requestURL
+    }
+    
+    /// Constructs a URLRequest by setting the HTTP method, headers, authorization token, and JSON body if applicable.
+    private func buildURLRequest(for httpRequest: SwiftRestRequest, requestURL: URL) -> URLRequest {
+        var request = URLRequest(url: requestURL)
+        request.httpMethod = httpRequest.method.rawValue
+        
+        // Add client-level base headers.
+        for (key, value) in baseHeaders {
+            request.addValue(value, forHTTPHeaderField: key)
+        }
+        
+        // Add request-specific headers.
+        if let headers = httpRequest.headers {
+            for (key, value) in headers {
+                request.addValue(value, forHTTPHeaderField: key)
+            }
+        }
+        
+        // Add authorization token if provided.
+        if let token = httpRequest.authToken {
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        
+        // Set the JSON body for POST/PUT requests.
+        if (httpRequest.method == .post || httpRequest.method == .put),
+           let jsonBody = httpRequest.jsonBody {
+            request.httpBody = jsonBody.data(using: .utf8)
+            if httpRequest.headers?["Content-Type"] == nil {
+                request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            }
+        }
+        
+        return request
+    }
+    
+    /// Processes the URL response by capturing response details and decoding JSON if applicable.
+    private func processResponse<T: Decodable>(_ data: Data, _ urlResponse: URLResponse, _ startTime: Date, type: T.Type) throws -> SwiftRestResponse<T> {
+        let responseTime = Date().timeIntervalSince(startTime)
+        guard let httpResponse = urlResponse as? HTTPURLResponse else {
+            throw SwiftRestClientError.invalidHTTPResponse
+        }
+        
+        let responseHeaders = httpResponse.allHeaderFields as? [String: String]
+        let statusCode = httpResponse.statusCode
+        let mimeType = httpResponse.mimeType
+        
+        var response = SwiftRestResponse<T>(
+            statusCode: statusCode,
+            headers: responseHeaders,
+            responseTime: responseTime,
+            finalURL: httpResponse.url,
+            mimeType: mimeType
+        )
+        
+        guard (200...299).contains(statusCode) else {
+            return response
+        }
+        
+        guard !data.isEmpty else { return response }
+        
+        if let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type"),
+           contentType.contains("application/json") {
+            guard let bodyString = String(data: data, encoding: .utf8), !bodyString.isEmpty else {
+                return response
+            }
+            let parsedPayload = try Json.parse(data: bodyString) as T
+            response = SwiftRestResponse(
+                statusCode: statusCode,
+                data: parsedPayload,
+                rawValue: String(data: data, encoding: .utf8),
+                headers: responseHeaders,
+                responseTime: responseTime,
+                finalURL: httpResponse.url,
+                mimeType: mimeType
+            )
+        }
+        
+        return response
+    }
+    
     /// A helper type representing an empty response.
     private struct NoContent: Decodable, Sendable {}
 }
-
 
