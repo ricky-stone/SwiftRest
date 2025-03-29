@@ -10,12 +10,7 @@ public actor SwiftRestClient {
     
     /// The base URL for all requests.
     private let url: String
-    
-    /// Base headers that are applied to every request.
-    ///
-    /// These headers are merged with the request-specific headers; in case of conflicts, the request's headers take precedence.
-    public var baseHeaders: [String: String]
-    
+        
     /// Initializes a new REST client with the specified base URL and optional base headers.
     ///
     /// The provided base headers will be applied to every request made by this client, merging with any request-specific headers.
@@ -24,9 +19,8 @@ public actor SwiftRestClient {
     /// - Parameters:
     ///   - url: The base URL as a string.
     ///   - baseHeaders: A dictionary of header keys and values to be applied to each request.
-    public init(_ url: String, baseHeaders: [String: String] = [:]) {
+    public init(_ url: String) {
         self.url = url
-        self.baseHeaders = baseHeaders
     }
     
     /// Executes a REST request and decodes the response to the specified type.
@@ -109,12 +103,7 @@ public actor SwiftRestClient {
     private func buildURLRequest(for httpRequest: SwiftRestRequest, requestURL: URL) -> URLRequest {
         var request = URLRequest(url: requestURL)
         request.httpMethod = httpRequest.method.rawValue
-        
-        // Add client-level base headers.
-        for (key, value) in baseHeaders {
-            request.addValue(value, forHTTPHeaderField: key)
-        }
-        
+                
         // Add request-specific headers.
         if let headers = httpRequest.headers {
             for (key, value) in headers {

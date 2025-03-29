@@ -72,14 +72,6 @@ Initialize the SwiftRestClient with your base URL. You can also specify base hea
 let client = SwiftRestClient("https://api.example.com")
 ```
 
-```swift
-// Initializing with base headers:
-let clientWithHeaders = SwiftRestClient("https://api.example.com", baseHeaders: [
-    "X-Requested-By": "SwiftRest",
-    "X-API-Version": "1"
-])
-```
-
 Executing a Request
 
 SwiftRest provides two methods for executing requests asynchronously:
