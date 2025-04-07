@@ -1,5 +1,8 @@
 # SwiftRest
 
+[![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fricky-stone%2FSwiftRest%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/ricky-stone/SwiftRest)
+[![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fricky-stone%2FSwiftRest%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/ricky-stone/SwiftRest)
+
 SwiftRest is a lightweight, easy-to-use Swift package for building REST API clients. It provides a flexible and robust solution for sending HTTP requests with built-in support for retries, base headers, and per-request authorization tokens—all while using a consistent JSON encoding/decoding strategy.
 
 ---
