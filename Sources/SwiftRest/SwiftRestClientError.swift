@@ -77,7 +77,7 @@ extension SwiftRestClientError: LocalizedError {
         }
     }
     
-    var userMessage: String {
+    public var userMessage: String {
             switch self {
             case .invalidBaseURL(let url):
                 return "Invalid URL: “\(url)”"
