@@ -5,21 +5,23 @@
 
 import Foundation
 
-/// An enumeration of errors that can occur when using the Swift REST client.
+/// Errors that can occur when using the Swift REST client.
 ///
-/// Conforms to `Error` and `Sendable` to allow safe propagation across concurrent contexts.
+/// Conforms to `Error` and `Sendable` for safe propagation in concurrent contexts.
 public enum SwiftRestClientError: Error, Sendable {
-    /// Indicates that the provided base URL is invalid.
+    /// The provided base URL string was invalid.
     case invalidBaseURL(String)
-    /// Indicates that URL components could not be constructed properly.
+    /// Failed to construct URL components (path or query).
     case invalidURLComponents
-    /// Indicates that the final URL (after appending path components or query items) is invalid.
+    /// The final URL after appending path or query items was invalid.
     case invalidFinalURL
-    /// Indicates that the HTTP response is invalid or malformed.
-    case invalidHTTPResponse
-    /// Indicates that the expected "Content-Type" header is missing.
-    case missingContentType
-    /// Indicates that the maximum number of retry attempts has been reached without success.
+    /// A network-level error occurred (e.g., timeout, unreachable host).
+    case networkError(underlying: Error)
+    /// A decoding error occurred while parsing the JSON response.
+    case decodingError(underlying: Error)
+    /// The HTTP response returned a non-2xx status code.
+    case httpError(ErrorResponse)
+    /// Exceeded the maximum number of retry attempts.
     case retryLimitReached
 }
 
@@ -27,17 +29,51 @@ extension SwiftRestClientError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .invalidBaseURL(let url):
-            return NSLocalizedString("The base URL provided (\(url)) is invalid. Please check the URL format.", comment: "Invalid Base URL")
+            return NSLocalizedString(
+                "The base URL provided (\(url)) is invalid. Please check the URL format.",
+                comment: "Invalid Base URL"
+            )
         case .invalidURLComponents:
-            return NSLocalizedString("Unable to construct URL components.", comment: "Invalid URL Components")
+            return NSLocalizedString(
+                "Unable to construct URL components.",
+                comment: "Invalid URL Components"
+            )
         case .invalidFinalURL:
-            return NSLocalizedString("The final URL is invalid after appending path components or query items.", comment: "Invalid Final URL")
-        case .invalidHTTPResponse:
-            return NSLocalizedString("Received an invalid or malformed HTTP response.", comment: "Invalid HTTP Response")
-        case .missingContentType:
-            return NSLocalizedString("The 'Content-Type' header is missing from the response.", comment: "Missing Content-Type")
+            return NSLocalizedString(
+                "The final URL is invalid after appending path components or query items.",
+                comment: "Invalid Final URL"
+            )
+        case .networkError(let error):
+            return String(format:
+                NSLocalizedString(
+                    "A network error occurred: %@",
+                    comment: "Network Error"
+                ),
+                error.localizedDescription
+            )
+        case .decodingError(let error):
+            return String(format:
+                NSLocalizedString(
+                    "Failed to decode response: %@",
+                    comment: "Decoding Error"
+                ),
+                error.localizedDescription
+            )
+        case .httpError(let response):
+            let body = (response.rawPayload ?? response.message) ?? ""
+            return String(format:
+                NSLocalizedString(
+                    "HTTP %d: %@",
+                    comment: "HTTP Error"
+                ),
+                response.statusCode,
+                body
+            )
         case .retryLimitReached:
-            return NSLocalizedString("The maximum number of retry attempts has been reached. Please try again later.", comment: "Retry Limit Reached")
+            return NSLocalizedString(
+                "The maximum number of retry attempts has been reached. Please try again later.",
+                comment: "Retry Limit Reached"
+            )
         }
     }
 }
