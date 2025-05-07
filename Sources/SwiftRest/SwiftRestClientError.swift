@@ -61,14 +61,29 @@ extension SwiftRestClientError: LocalizedError {
             )
         case .httpError(let response):
             let body = (response.rawPayload ?? response.message) ?? ""
-            return String(format:
-                NSLocalizedString(
-                    "HTTP %d: %@",
-                    comment: "HTTP Error"
-                ),
-                response.statusCode,
-                body
-            )
+            let reason = HTTPURLResponse
+                .localizedString(forStatusCode: response.statusCode)
+                .capitalized
+            if body.isEmpty {
+                return String(format:
+                    NSLocalizedString(
+                        "HTTP %d: %@",
+                        comment: "HTTP Error"
+                    ),
+                    response.statusCode,
+                    reason
+                )
+            } else {
+                return String(format:
+                    NSLocalizedString(
+                        "HTTP %d: %@ - %@",
+                        comment: "HTTP Error"
+                    ),
+                    response.statusCode,
+                    reason,
+                    body
+                )
+            }
         case .retryLimitReached:
             return NSLocalizedString(
                 "The maximum number of retry attempts has been reached. Please try again later.",
@@ -76,34 +91,43 @@ extension SwiftRestClientError: LocalizedError {
             )
         }
     }
-    
-    public var userMessage: String {
-            switch self {
-            case .invalidBaseURL(let url):
-                return "Invalid URL: “\(url)”"
-            case .invalidURLComponents:
-                return "Unable to construct URL."
-            case .invalidFinalURL:
-                return "Invalid final URL after appending path or query."
-            case .networkError(let error):
-                return "Network error: \(error.localizedDescription)"
-            case .decodingError(let error):
-                return "Response decoding error: \(error.localizedDescription)"
-            case .httpError(let response):
-                // Get the standard HTTP reason phrase, capitalized
-                let reason = HTTPURLResponse
-                    .localizedString(forStatusCode: response.statusCode)
-                    .capitalized
-                // Pull in any body or fallback message
-                let body = (response.rawPayload ?? response.message) ?? ""
-                // Compose final string
-                if body.isEmpty {
-                    return "HTTP \(response.statusCode) \(reason)"
-                } else {
-                    return "HTTP \(response.statusCode) \(reason): \(body)"
+}
+
+/// Provides a plain-text, user-friendly summary of the error.
+///
+/// Extracts JSON `reason` or `title` fields for HTTP errors when available,
+/// otherwise falls back to the standard HTTP reason phrase.
+public extension SwiftRestClientError {
+    var userMessage: String {
+        switch self {
+        case .invalidBaseURL(let url):
+            return "Invalid URL: \"\(url)\""
+        case .invalidURLComponents:
+            return "Unable to construct URL."
+        case .invalidFinalURL:
+            return "Invalid final URL after appending path or query."
+        case .networkError(let error):
+            return "Network error: \(error.localizedDescription)"
+        case .decodingError(let error):
+            return "Response decoding error: \(error.localizedDescription)"
+        case .httpError(let response):
+            let code = response.statusCode
+            if let raw = response.rawPayload ?? response.message,
+               let data = raw.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if let reason = json["reason"] as? String {
+                    return "\(code): \(reason)"
                 }
-            case .retryLimitReached:
-                return "Too many attempts. Please try again later."
+                if let title = json["title"] as? String {
+                    return "\(code): \(title)"
+                }
             }
+            let phrase = HTTPURLResponse
+                .localizedString(forStatusCode: code)
+                .capitalized
+            return "\(code): \(phrase)"
+        case .retryLimitReached:
+            return "Too many attempts. Please try again later."
         }
+    }
 }
