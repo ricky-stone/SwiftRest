@@ -202,68 +202,62 @@ public actor SwiftRestClient {
         type: T.Type
     ) throws -> SwiftRestResponse<T> {
         let responseTime = Date().timeIntervalSince(startTime)
-        
-        // Ensure we have an HTTP response
         guard let httpResponse = urlResponse as? HTTPURLResponse else {
-            let errorResponse = ErrorResponse(
+            let err = ErrorResponse(
                 statusCode: 0,
-                message: "Received an invalid or malformed HTTP response.",
-                url: nil,
-                headers: nil,
+                message: "Invalid HTTP response",
+                url: nil, headers: nil,
                 rawPayload: nil,
                 responseTime: responseTime
             )
-            throw SwiftRestClientError.httpError(errorResponse)
+            throw SwiftRestClientError.httpError(err)
         }
-        
-        let statusCode = httpResponse.statusCode
-        let responseHeaders = httpResponse.allHeaderFields as? [String: String]
-        let mimeType = httpResponse.mimeType
-        
-        // Build the base SwiftRestResponse without payload
-        var response = SwiftRestResponse<T>(
-            statusCode: statusCode,
-            headers: responseHeaders,
-            responseTime: responseTime,
-            finalURL: httpResponse.url,
-            mimeType: mimeType
-        )
-        
-        // Decode JSON payload if applicable
-        if !data.isEmpty,
-           let contentType = httpResponse.value(
-               forHTTPHeaderField: "Content-Type"
-           ),
-           contentType.contains("application/json") {
-            if let bodyString = String(data: data, encoding: .utf8),
-               !bodyString.isEmpty {
-                let parsedPayload = try Json.parse(data: bodyString) as T
+
+        let statusCode    = httpResponse.statusCode
+        let headers       = httpResponse.allHeaderFields as? [String: String]
+        let finalURL      = httpResponse.url
+        let rawString     = String(data: data, encoding: .utf8)
+
+        // If it's a success code, decode into T
+        if (200...299).contains(statusCode) {
+            var response = SwiftRestResponse<T>(
+                statusCode:   statusCode,
+                headers:      headers,
+                responseTime: responseTime,
+                finalURL:     finalURL,
+                mimeType:     httpResponse.mimeType
+            )
+
+            if let body = rawString,
+               let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type"),
+               contentType.contains("application/json"),
+               !body.isEmpty
+            {
+                let parsed = try Json.parse(data: body) as T
                 response = SwiftRestResponse(
-                    statusCode: statusCode,
-                    data: parsedPayload,
-                    rawValue: bodyString,
-                    headers: responseHeaders,
+                    statusCode:   statusCode,
+                    data:         parsed,
+                    rawValue:     body,
+                    headers:      headers,
                     responseTime: responseTime,
-                    finalURL: httpResponse.url,
-                    mimeType: mimeType
+                    finalURL:     finalURL,
+                    mimeType:     httpResponse.mimeType
                 )
             }
+
+            return response
         }
-        
-        // Throw for non-2xx status codes, including full payload
-        guard (200...299).contains(statusCode) else {
-            let errorResponse = ErrorResponse(
-                statusCode: statusCode,
-                message: response.rawValue,
-                url: httpResponse.url,
-                headers: responseHeaders,
-                rawPayload: response.rawValue,
-                responseTime: responseTime
-            )
-            throw SwiftRestClientError.httpError(errorResponse)
-        }
-        
-        return response
+
+        // Otherwise, throw httpError immediately, carrying the raw body
+        let errorResp = ErrorResponse(
+            statusCode:   statusCode,
+            message:      rawString,
+            url:          finalURL,
+            headers:      headers,
+            rawPayload:   rawString,
+            responseTime: responseTime
+        )
+        throw SwiftRestClientError.httpError(errorResp)
     }
     
     /// A placeholder type for requests expecting no response payload.
