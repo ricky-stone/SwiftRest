@@ -76,4 +76,34 @@ extension SwiftRestClientError: LocalizedError {
             )
         }
     }
+    
+    var userMessage: String {
+            switch self {
+            case .invalidBaseURL(let url):
+                return "Invalid URL: “\(url)”"
+            case .invalidURLComponents:
+                return "Unable to construct URL."
+            case .invalidFinalURL:
+                return "Invalid final URL after appending path or query."
+            case .networkError(let error):
+                return "Network error: \(error.localizedDescription)"
+            case .decodingError(let error):
+                return "Response decoding error: \(error.localizedDescription)"
+            case .httpError(let response):
+                // Get the standard HTTP reason phrase, capitalized
+                let reason = HTTPURLResponse
+                    .localizedString(forStatusCode: response.statusCode)
+                    .capitalized
+                // Pull in any body or fallback message
+                let body = (response.rawPayload ?? response.message) ?? ""
+                // Compose final string
+                if body.isEmpty {
+                    return "HTTP \(response.statusCode) \(reason)"
+                } else {
+                    return "HTTP \(response.statusCode) \(reason): \(body)"
+                }
+            case .retryLimitReached:
+                return "Too many attempts. Please try again later."
+            }
+        }
 }
