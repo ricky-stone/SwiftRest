@@ -13,7 +13,7 @@ import Foundation
 /// - Request-specific headers and JSON body
 /// - Bearer token authorization
 /// - JSON decoding into `Decodable` types
-public actor SwiftRestClient {
+public actor SwiftRestClient: RestClientType {
     
     /// The base URL string used for all requests.
     private let url: String
@@ -259,7 +259,4 @@ public actor SwiftRestClient {
         )
         throw SwiftRestClientError.httpError(errorResp)
     }
-    
-    /// A placeholder type for requests expecting no response payload.
-    private struct NoContent: Decodable, Sendable {}
 }
