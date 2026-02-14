@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.0.1 - 2026-02-14
+
+### Changed
+- Refined README language and examples to keep both compact and `do/catch` flows clear.
+- Added explicit beginner-friendly examples for:
+  - posting with a model variable
+  - success/failure-only POST calls with `NoContent`
+  - optional status-based checks with `isSuccess`
+- Removed wording that implied one usage style is less safe than another.
+
 ## 3.0.0 - 2026-02-14
 
 ### Changed

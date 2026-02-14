@@ -1,10 +1,10 @@
 # SwiftRest
 
-SwiftRest is a Swift 6 REST client that is simple to use and concurrency-safe.
+SwiftRest is a Swift 6 REST client designed to stay simple.
 
 - `SwiftRestClient` is an `actor`.
 - Public models are `Sendable`.
-- You can decode typed models and still read headers/body easily.
+- You can decode models and read headers from the same call.
 
 ## Requirements
 
@@ -18,7 +18,9 @@ Use Swift Package Manager with:
 
 - `https://github.com/ricky-stone/SwiftRest.git`
 
-## Quick Start (Fast)
+## Quick Start
+
+### Compact
 
 ```swift
 import SwiftRest
@@ -28,14 +30,12 @@ struct User: Decodable, Sendable {
     let name: String
 }
 
-// No config passed -> SwiftRestConfig.standard is used.
 let client = try SwiftRestClient("https://api.example.com")
-
 let user: User = try await client.get("users/1")
 print(user.name)
 ```
 
-## Quick Start (With `do/catch`)
+### With `do/catch`
 
 ```swift
 import SwiftRest
@@ -57,9 +57,9 @@ do {
 }
 ```
 
-## One Call: Get Data and Headers Together
+## One Call: Data + Headers
 
-### Fast version
+### Compact
 
 ```swift
 let response: SwiftRestResponse<User> = try await client.getResponse("users/1")
@@ -67,23 +67,18 @@ print(response.data?.name ?? "none")
 print(response.headers["content-type"] ?? "missing")
 ```
 
-### Safer version (recommended)
+### Checked
 
 ```swift
 do {
     let response: SwiftRestResponse<User> = try await client.getResponse("users/1")
 
-    guard response.isSuccess else {
-        print("Request failed with status: \(response.statusCode)")
-        print("Body: \(response.text() ?? "<empty>")")
-        return
-    }
-
     guard let user = response.data else {
-        print("No user payload in successful response")
+        print("No user payload returned")
         return
     }
 
+    print("Status: \(response.statusCode)")
     print("User name: \(user.name)")
     print("Content-Type: \(response.headers["content-type"] ?? "missing")")
     print("X-Request-Id: \(response.headers["x-request-id"] ?? "missing")")
@@ -94,14 +89,68 @@ do {
 }
 ```
 
-Use the same pattern for write operations when you want decoded data + headers:
+Use the same pattern for writes when you want decoded data + headers:
 
 - `postResponse(...)`
 - `putResponse(...)`
 - `patchResponse(...)`
 - `deleteResponse(...)`
 
-## Decode Models: Common Styles
+## POST/PUT/PATCH with a Model Body
+
+```swift
+struct CreateUser: Encodable, Sendable {
+    let name: String
+}
+
+let ricky = CreateUser(name: "Ricky")
+
+let created: User = try await client.post("users", body: ricky)
+let updated: User = try await client.put("users/1", body: CreateUser(name: "Ricky Stone"))
+let patched: User = try await client.patch("users/1", body: ["name": "Ricky S."])
+```
+
+## POST That Only Needs Success/Failure (No Data Body)
+
+### Throw-based flow (simple default)
+
+```swift
+let payload = CreateUser(name: "Ricky")
+
+do {
+    let _: NoContent = try await client.post("users", body: payload, as: NoContent.self)
+    print("Created successfully")
+} catch {
+    print("Create failed: \(error)")
+}
+```
+
+### Status-check flow (`isSuccess`)
+
+```swift
+let payload = CreateUser(name: "Ricky")
+let raw = try await client.postRaw("users", body: payload, allowHTTPError: true)
+
+if raw.isSuccess {
+    print("Created successfully (\(raw.statusCode))")
+} else {
+    print("Create failed (\(raw.statusCode))")
+    print(raw.text() ?? "")
+}
+```
+
+## DELETE Example
+
+```swift
+let _: NoContent = try await client.delete("users/1")
+
+// If you also want status + headers:
+let rawDelete = try await client.deleteRaw("users/1", allowHTTPError: true)
+print(rawDelete.statusCode)
+print(rawDelete.headers["x-request-id"] ?? "missing")
+```
+
+## Other Decode Styles
 
 ```swift
 // 1) Inferred type
@@ -128,17 +177,6 @@ print(raw.text() ?? "")
 let user = try raw.decodeBody(User.self)
 let jsonObject = try raw.jsonObject()
 let prettyJSON = try raw.prettyPrintedJSON()
-```
-
-## POST / PUT / PATCH / DELETE
-
-```swift
-struct CreateUser: Encodable, Sendable { let name: String }
-
-let created: User = try await client.post("users", body: CreateUser(name: "Ricky"))
-let updated: User = try await client.put("users/1", body: CreateUser(name: "Ricky Stone"))
-let patched: User = try await client.patch("users/1", body: ["name": "Ricky S."])
-let _: NoContent = try await client.delete("users/1")
 ```
 
 ## Request Builder Styles
@@ -172,7 +210,7 @@ When no config is passed, SwiftRest uses `SwiftRestConfig.standard`:
   - Base delay: `0.5` seconds
   - Retryable status codes: `408, 429, 500, 502, 503, 504`
 
-Custom config example:
+Custom config:
 
 ```swift
 let config = SwiftRestConfig(
@@ -228,4 +266,4 @@ Thanks to everyone who tests, reports issues, and contributes improvements.
 
 ## Version
 
-Current source version marker: `SwiftRestVersion.current == "3.0.0"`
+Current source version marker: `SwiftRestVersion.current == "3.0.1"`
