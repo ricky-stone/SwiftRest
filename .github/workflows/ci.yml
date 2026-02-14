@@ -17,17 +17,47 @@ concurrency:
 jobs:
   swift-test:
     name: Build and Test (Swift 6)
-    runs-on: macos-14
+    runs-on: macos-15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Select Xcode (Swift 6+)
+        run: |
+          set -euo pipefail
+
+          selected=""
+          for candidate in /Applications/Xcode_17*.app /Applications/Xcode_16*.app /Applications/Xcode.app; do
+            if [ -d "$candidate" ]; then
+              selected="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$selected" ]; then
+            echo "No Xcode installation found."
+            ls -la /Applications
+            exit 1
+          fi
+
+          echo "Selecting: $selected"
+          sudo xcode-select -s "$selected/Contents/Developer"
+          xcodebuild -version
+
       - name: Show Swift Version
-        run: swift --version
+        run: |
+          set -euo pipefail
+          swift --version
+          SWIFT_MAJOR="$(swift --version | awk 'NR==1{print $4}' | cut -d. -f1)"
+          if [ "${SWIFT_MAJOR:-0}" -lt 6 ]; then
+            echo "Swift 6+ is required for this package."
+            exit 1
+          fi
 
       - name: Build
-        run: swift build
+        run: swift build --build-tests
 
       - name: Test
-        run: swift test
+        run: swift test --parallel
