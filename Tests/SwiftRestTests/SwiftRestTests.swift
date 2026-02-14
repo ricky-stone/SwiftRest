@@ -122,7 +122,7 @@ struct Dummy: Codable, Equatable, Sendable {
     #expect(SwiftRestConfig.standard.retryPolicy.maxAttempts == 3)
     #expect(SwiftRestConfig.standard.retryPolicy.baseDelay == 0.5)
     #expect(RetryPolicy.standard.retryableStatusCodes.contains(429))
-    #expect(SwiftRestVersion.current == "3.0.1")
+    #expect(SwiftRestVersion.current == "3.0.2")
 
     _ = try SwiftRestClient("https://api.example.com")
 }

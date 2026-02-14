@@ -1,5 +1,24 @@
 # Changelog
 
+## 3.0.2 - 2026-02-14
+
+### Added
+- GitHub Actions CI workflow (`swift build` + `swift test` on macOS/Swift 6).
+- Repository automation files:
+  - `.github/CODEOWNERS`
+  - `.github/dependabot.yml`
+- Community health files:
+  - `CONTRIBUTING.md`
+  - `CODE_OF_CONDUCT.md`
+  - `SECURITY.md`
+  - issue templates and PR template
+- README badges and community links for Discussions, Issues, and contribution/security guidance.
+
+### Changed
+- Repository metadata updated (description, topics, homepage).
+- GitHub Discussions enabled.
+- Published stable GitHub Release for `v3.0.1`.
+
 ## 3.0.1 - 2026-02-14
 
 ### Changed

@@ -1,5 +1,11 @@
 # SwiftRest
 
+[![CI](https://github.com/ricky-stone/SwiftRest/actions/workflows/ci.yml/badge.svg)](https://github.com/ricky-stone/SwiftRest/actions/workflows/ci.yml)
+[![Swift](https://img.shields.io/badge/Swift-6.0+-F05138.svg)](https://www.swift.org/)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/ricky-stone/SwiftRest/blob/main/LICENSE.txt)
+[![Swift Package Index](https://img.shields.io/badge/Swift%20Package%20Index-SwiftRest-111111)](https://swiftpackageindex.com/ricky-stone/SwiftRest)
+[![GitHub stars](https://img.shields.io/github/stars/ricky-stone/SwiftRest?style=social)](https://github.com/ricky-stone/SwiftRest/stargazers)
+
 SwiftRest is a Swift 6 REST client designed to stay simple.
 
 - `SwiftRestClient` is an `actor`.
@@ -17,6 +23,13 @@ SwiftRest is a Swift 6 REST client designed to stay simple.
 Use Swift Package Manager with:
 
 - `https://github.com/ricky-stone/SwiftRest.git`
+
+## Community
+
+- Questions and ideas: [GitHub Discussions](https://github.com/ricky-stone/SwiftRest/discussions)
+- Bugs and feature requests: [GitHub Issues](https://github.com/ricky-stone/SwiftRest/issues)
+- Contributing guide: [`CONTRIBUTING.md`](./CONTRIBUTING.md)
+- Security reports: [`SECURITY.md`](./SECURITY.md)
 
 ## Quick Start
 
@@ -266,4 +279,4 @@ Thanks to everyone who tests, reports issues, and contributes improvements.
 
 ## Version
 
-Current source version marker: `SwiftRestVersion.current == "3.0.1"`
+Current source version marker: `SwiftRestVersion.current == "3.0.2"`
