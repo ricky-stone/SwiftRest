@@ -41,10 +41,6 @@ public struct RetryPolicy: Sendable {
 
     /// Recommended default retries for common transient failures.
     public static let standard = RetryPolicy(maxAttempts: 3, baseDelay: 0.5)
-
-    /// Backward-compatible alias for `standard`.
-    @available(*, deprecated, renamed: "standard")
-    public static let beginner = standard
 }
 
 /// Shared client configuration.
@@ -79,13 +75,9 @@ public struct SwiftRestConfig: Sendable {
         timeout: 30,
         retryPolicy: .standard
     )
-
-    /// Backward-compatible alias for `standard`.
-    @available(*, deprecated, renamed: "standard")
-    public static let beginner = standard
 }
 
 /// Source-level version marker for this release line.
 public enum SwiftRestVersion {
-    public static let current = "2.0.1"
+    public static let current = "3.0.0"
 }

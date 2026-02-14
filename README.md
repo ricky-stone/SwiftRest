@@ -1,10 +1,10 @@
 # SwiftRest
 
-SwiftRest is a Swift 6 REST client that is simple for beginners and safe for concurrency.
+SwiftRest is a Swift 6 REST client that is simple to use and concurrency-safe.
 
 - `SwiftRestClient` is an `actor`.
-- Request/response models are `Sendable`.
-- You can decode models fast, or inspect raw headers/body when needed.
+- Public models are `Sendable`.
+- You can decode typed models and still read headers/body easily.
 
 ## Requirements
 
@@ -18,7 +18,7 @@ Use Swift Package Manager with:
 
 - `https://github.com/ricky-stone/SwiftRest.git`
 
-## Fastest Start
+## Quick Start (Fast)
 
 ```swift
 import SwiftRest
@@ -28,85 +28,103 @@ struct User: Decodable, Sendable {
     let name: String
 }
 
-// No config passed -> SwiftRestConfig.standard is used automatically.
+// No config passed -> SwiftRestConfig.standard is used.
 let client = try SwiftRestClient("https://api.example.com")
 
 let user: User = try await client.get("users/1")
 print(user.name)
 ```
 
-## Default Config (`.standard`)
-
-When you do not pass a config, SwiftRest uses `SwiftRestConfig.standard`:
-
-- Base header: `Accept: application/json`
-- Timeout: `30` seconds
-- Retry policy: `RetryPolicy.standard`
-  - Max attempts: `3`
-  - Base delay: `0.5` seconds
-  - Retryable status codes: `408, 429, 500, 502, 503, 504`
-
-You can still use `.beginner` as a compatibility alias, but `.standard` is the preferred name.
-
-## Decoding Models: All Common Ways
-
-### 1) Inferred type (shortest)
+## Quick Start (With `do/catch`)
 
 ```swift
-let user: User = try await client.get("users/1")
+import SwiftRest
+
+struct User: Decodable, Sendable {
+    let id: Int
+    let name: String
+}
+
+let client = try SwiftRestClient("https://api.example.com")
+
+do {
+    let user: User = try await client.get("users/1")
+    print("User name: \(user.name)")
+} catch let error as SwiftRestClientError {
+    print(error.userMessage)
+} catch {
+    print(error.localizedDescription)
+}
 ```
 
-### 2) Explicit type with `as:`
+## One Call: Get Data and Headers Together
 
-```swift
-let user = try await client.get("users/1", as: User.self)
-```
-
-### 3) Request object + direct decode
-
-```swift
-let request = SwiftRestRequest(path: "users/1", method: .get)
-let user = try await client.execute(request, as: User.self)
-```
-
-### 4) Request object + decoded response metadata
-
-```swift
-let request = SwiftRestRequest(path: "users/1", method: .get)
-let response: SwiftRestResponse<User> = try await client.executeAsyncWithResponse(request)
-
-print(response.statusCode)
-print(response.data?.name ?? "none")
-```
-
-## Read Headers and Payload (Very Simple)
-
-### Option A: Typed response + headers
+### Fast version
 
 ```swift
 let response: SwiftRestResponse<User> = try await client.getResponse("users/1")
-
-print(response.statusCode)
-print(response.header("content-type") ?? "n/a")
-print(response.headers["x-request-id"] ?? "missing")
 print(response.data?.name ?? "none")
+print(response.headers["content-type"] ?? "missing")
 ```
 
-### Option B: Raw response (no decoding required)
+### Safer version (recommended)
+
+```swift
+do {
+    let response: SwiftRestResponse<User> = try await client.getResponse("users/1")
+
+    guard response.isSuccess else {
+        print("Request failed with status: \(response.statusCode)")
+        print("Body: \(response.text() ?? "<empty>")")
+        return
+    }
+
+    guard let user = response.data else {
+        print("No user payload in successful response")
+        return
+    }
+
+    print("User name: \(user.name)")
+    print("Content-Type: \(response.headers["content-type"] ?? "missing")")
+    print("X-Request-Id: \(response.headers["x-request-id"] ?? "missing")")
+} catch let error as SwiftRestClientError {
+    print(error.userMessage)
+} catch {
+    print(error.localizedDescription)
+}
+```
+
+Use the same pattern for write operations when you want decoded data + headers:
+
+- `postResponse(...)`
+- `putResponse(...)`
+- `patchResponse(...)`
+- `deleteResponse(...)`
+
+## Decode Models: Common Styles
+
+```swift
+// 1) Inferred type
+let user1: User = try await client.get("users/1")
+
+// 2) Explicit `as:`
+let user2 = try await client.get("users/1", as: User.self)
+
+// 3) Request object
+let request = SwiftRestRequest(path: "users/1", method: .get)
+let user3 = try await client.execute(request, as: User.self)
+```
+
+## Raw Response Access
 
 ```swift
 let raw = try await client.getRaw("users/1")
 
 print(raw.statusCode)
-print(raw.headers["content-type"] ?? "n/a")
+print(raw.headers["content-type"] ?? "missing")
 print(raw.headers.values(for: "set-cookie"))
 print(raw.text() ?? "")
-```
 
-### Option C: Decode later from raw body
-
-```swift
-let raw = try await client.getRaw("users/1")
 let user = try raw.decodeBody(User.self)
 let jsonObject = try raw.jsonObject()
 let prettyJSON = try raw.prettyPrintedJSON()
@@ -122,13 +140,6 @@ let updated: User = try await client.put("users/1", body: CreateUser(name: "Rick
 let patched: User = try await client.patch("users/1", body: ["name": "Ricky S."])
 let _: NoContent = try await client.delete("users/1")
 ```
-
-If you want metadata + headers from write calls, use:
-
-- `postResponse(...)`
-- `putResponse(...)`
-- `patchResponse(...)`
-- `deleteResponse(...)`
 
 ## Request Builder Styles
 
@@ -150,7 +161,18 @@ let request = SwiftRestRequest.get("users")
     .retries(maxRetries: 2, retryDelay: 0.5)
 ```
 
-## Custom Configuration
+## Default Config (`.standard`)
+
+When no config is passed, SwiftRest uses `SwiftRestConfig.standard`:
+
+- Base header: `Accept: application/json`
+- Timeout: `30` seconds
+- Retry policy: `RetryPolicy.standard`
+  - Max attempts: `3`
+  - Base delay: `0.5` seconds
+  - Retryable status codes: `408, 429, 500, 502, 503, 504`
+
+Custom config example:
 
 ```swift
 let config = SwiftRestConfig(
@@ -167,7 +189,7 @@ let config = SwiftRestConfig(
 let client = try SwiftRestClient("https://api.example.com", config: config)
 ```
 
-## Error Handling
+## Error Handling Pattern
 
 ```swift
 do {
@@ -181,6 +203,8 @@ do {
         print(details.headers["content-type"] ?? "n/a")
         print(details.rawPayload ?? "")
     }
+} catch {
+    print(error.localizedDescription)
 }
 ```
 
@@ -188,11 +212,11 @@ do {
 
 SwiftRest is licensed under the MIT License. See `LICENSE.txt`.
 
-Industry-standard reminder for MIT:
+Industry standard for MIT:
 
 - You can use this in commercial/private/open-source projects.
-- Keep the copyright and license notice when redistributing.
-- Attribution in app UI/docs is appreciated but not required by MIT.
+- Keep the copyright + license notice when redistributing.
+- Attribution is appreciated but not required by MIT.
 
 ## Author
 
@@ -204,4 +228,4 @@ Thanks to everyone who tests, reports issues, and contributes improvements.
 
 ## Version
 
-Current source version marker: `SwiftRestVersion.current == "2.0.1"`
+Current source version marker: `SwiftRestVersion.current == "3.0.0"`

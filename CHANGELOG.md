@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.0.0 - 2026-02-14
+
+### Changed
+- README examples were revised for clarity, including quick and `do/catch` patterns.
+- Added stronger one-call examples for reading decoded data and response headers together.
+- Standardized naming around `.standard` for default config/retry profiles.
+
+### Removed / Breaking
+- Removed legacy default-profile aliases in favor of `.standard` naming only.
+
 ## 2.0.1 - 2026-02-14
 
 ### Added
@@ -9,9 +19,6 @@
 - Preferred default config naming is now `SwiftRestConfig.standard` and `RetryPolicy.standard`.
 - `SwiftRestClient` now defaults to `.standard` when no config is passed.
 - README now includes explicit header-reading patterns, default config behavior, and license/author/acknowledgment guidance.
-
-### Compatibility
-- `.beginner` remains available as a deprecated alias for `.standard`.
 
 ## 2.0.0 - 2026-02-14
 
@@ -27,7 +34,7 @@
 - `SwiftRestClient` initializer now validates base URL and can throw.
 - Public APIs use Swift 6-style `Decodable & Sendable` constraints.
 - Error payload model is `Sendable` and easier to inspect.
-- README fully rewritten for beginner-first usage.
+- README fully rewritten for easy onboarding usage.
 
 ### Removed / Breaking
 - Existing callers that assumed a non-throwing client init must add `try`.
