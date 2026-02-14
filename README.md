@@ -1,13 +1,10 @@
-# SwiftRest (v2)
+# SwiftRest
 
-SwiftRest is a lightweight **Swift 6** REST client focused on beginner ergonomics and actor-based concurrency safety.
+SwiftRest is a Swift 6 REST client that is simple for beginners and safe for concurrency.
 
-## Why v2
-
-- `SwiftRestClient` stays an `actor` for safe concurrent use.
-- Raw responses are first-class (`status`, `headers`, `payload`).
-- Typed decoding is simple and available in multiple styles.
-- Retry behavior is configurable but easy by default.
+- `SwiftRestClient` is an `actor`.
+- Request/response models are `Sendable`.
+- You can decode models fast, or inspect raw headers/body when needed.
 
 ## Requirements
 
@@ -17,11 +14,11 @@ SwiftRest is a lightweight **Swift 6** REST client focused on beginner ergonomic
 
 ## Installation
 
-Add this package with Swift Package Manager:
+Use Swift Package Manager with:
 
-- URL: `https://github.com/ricky-stone/SwiftRest.git`
+- `https://github.com/ricky-stone/SwiftRest.git`
 
-## Quick Start
+## Fastest Start
 
 ```swift
 import SwiftRest
@@ -31,18 +28,29 @@ struct User: Decodable, Sendable {
     let name: String
 }
 
-let client = try SwiftRestClient(
-    "https://api.example.com",
-    config: .beginner
-)
+// No config passed -> SwiftRestConfig.standard is used automatically.
+let client = try SwiftRestClient("https://api.example.com")
 
 let user: User = try await client.get("users/1")
 print(user.name)
 ```
 
-## Decoding: All Common Styles
+## Default Config (`.standard`)
 
-### 1) Inferred from variable type
+When you do not pass a config, SwiftRest uses `SwiftRestConfig.standard`:
+
+- Base header: `Accept: application/json`
+- Timeout: `30` seconds
+- Retry policy: `RetryPolicy.standard`
+  - Max attempts: `3`
+  - Base delay: `0.5` seconds
+  - Retryable status codes: `408, 429, 500, 502, 503, 504`
+
+You can still use `.beginner` as a compatibility alias, but `.standard` is the preferred name.
+
+## Decoding Models: All Common Ways
+
+### 1) Inferred type (shortest)
 
 ```swift
 let user: User = try await client.get("users/1")
@@ -54,25 +62,37 @@ let user: User = try await client.get("users/1")
 let user = try await client.get("users/1", as: User.self)
 ```
 
-### 3) Build request object + decode directly
+### 3) Request object + direct decode
 
 ```swift
 let request = SwiftRestRequest(path: "users/1", method: .get)
 let user = try await client.execute(request, as: User.self)
 ```
 
-### 4) Build request object + keep metadata + decoded payload
+### 4) Request object + decoded response metadata
 
 ```swift
 let request = SwiftRestRequest(path: "users/1", method: .get)
 let response: SwiftRestResponse<User> = try await client.executeAsyncWithResponse(request)
 
 print(response.statusCode)
-print(response.headers["content-type"] ?? "n/a")
 print(response.data?.name ?? "none")
 ```
 
-## Read Headers and Raw Payload Easily
+## Read Headers and Payload (Very Simple)
+
+### Option A: Typed response + headers
+
+```swift
+let response: SwiftRestResponse<User> = try await client.getResponse("users/1")
+
+print(response.statusCode)
+print(response.header("content-type") ?? "n/a")
+print(response.headers["x-request-id"] ?? "missing")
+print(response.data?.name ?? "none")
+```
+
+### Option B: Raw response (no decoding required)
 
 ```swift
 let raw = try await client.getRaw("users/1")
@@ -83,12 +103,13 @@ print(raw.headers.values(for: "set-cookie"))
 print(raw.text() ?? "")
 ```
 
-Parse payload manually if you want:
+### Option C: Decode later from raw body
 
 ```swift
+let raw = try await client.getRaw("users/1")
 let user = try raw.decodeBody(User.self)
-let json = try raw.jsonObject()
-let pretty = try raw.prettyPrintedJSON()
+let jsonObject = try raw.jsonObject()
+let prettyJSON = try raw.prettyPrintedJSON()
 ```
 
 ## POST / PUT / PATCH / DELETE
@@ -96,27 +117,22 @@ let pretty = try raw.prettyPrintedJSON()
 ```swift
 struct CreateUser: Encodable, Sendable { let name: String }
 
-let created: User = try await client.post(
-    "users",
-    body: CreateUser(name: "Ricky")
-)
-
-let updated: User = try await client.put(
-    "users/1",
-    body: CreateUser(name: "Ricky Stone")
-)
-
-let patched: User = try await client.patch(
-    "users/1",
-    body: ["name": "Ricky S."]
-)
-
+let created: User = try await client.post("users", body: CreateUser(name: "Ricky"))
+let updated: User = try await client.put("users/1", body: CreateUser(name: "Ricky Stone"))
+let patched: User = try await client.patch("users/1", body: ["name": "Ricky S."])
 let _: NoContent = try await client.delete("users/1")
 ```
 
+If you want metadata + headers from write calls, use:
+
+- `postResponse(...)`
+- `putResponse(...)`
+- `patchResponse(...)`
+- `deleteResponse(...)`
+
 ## Request Builder Styles
 
-Mutating style:
+### Mutating style
 
 ```swift
 var request = SwiftRestRequest(path: "users", method: .get)
@@ -125,7 +141,7 @@ request.addParameter("page", "1")
 request.configureRetries(maxRetries: 2, retryDelay: 0.5)
 ```
 
-Chainable style:
+### Chainable style
 
 ```swift
 let request = SwiftRestRequest.get("users")
@@ -134,15 +150,17 @@ let request = SwiftRestRequest.get("users")
     .retries(maxRetries: 2, retryDelay: 0.5)
 ```
 
-## Configuration
+## Custom Configuration
 
 ```swift
 let config = SwiftRestConfig(
-    baseHeaders: ["accept": "application/json"],
+    baseHeaders: ["accept": "application/json", "x-app": "Demo"],
     timeout: 20,
     retryPolicy: RetryPolicy(
-        maxAttempts: 3,
-        baseDelay: 0.5
+        maxAttempts: 4,
+        baseDelay: 0.4,
+        backoffMultiplier: 2,
+        maxDelay: 5
     )
 )
 
@@ -166,12 +184,24 @@ do {
 }
 ```
 
-## Concurrency Safety Notes
+## License
 
-- `SwiftRestClient` is an `actor`.
-- Public request/response/config models are `Sendable`.
-- APIs are built for `async/await` usage in Swift 6 projects.
+SwiftRest is licensed under the MIT License. See `LICENSE.txt`.
+
+Industry-standard reminder for MIT:
+
+- You can use this in commercial/private/open-source projects.
+- Keep the copyright and license notice when redistributing.
+- Attribution in app UI/docs is appreciated but not required by MIT.
+
+## Author
+
+Created and maintained by Ricky Stone.
+
+## Acknowledgments
+
+Thanks to everyone who tests, reports issues, and contributes improvements.
 
 ## Version
 
-Current source version marker: `SwiftRestVersion.current == "2.0.0"`
+Current source version marker: `SwiftRestVersion.current == "2.0.1"`

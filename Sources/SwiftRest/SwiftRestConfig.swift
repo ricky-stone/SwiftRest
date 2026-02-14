@@ -39,8 +39,12 @@ public struct RetryPolicy: Sendable {
     /// No retries.
     public static let none = RetryPolicy(maxAttempts: 1, baseDelay: 0)
 
-    /// Beginner-friendly retries for common transient failures.
-    public static let beginner = RetryPolicy(maxAttempts: 3, baseDelay: 0.5)
+    /// Recommended default retries for common transient failures.
+    public static let standard = RetryPolicy(maxAttempts: 3, baseDelay: 0.5)
+
+    /// Backward-compatible alias for `standard`.
+    @available(*, deprecated, renamed: "standard")
+    public static let beginner = standard
 }
 
 /// Shared client configuration.
@@ -64,15 +68,24 @@ public struct SwiftRestConfig: Sendable {
         self.retryPolicy = retryPolicy
     }
 
-    /// A practical default profile for most beginner apps.
-    public static let beginner = SwiftRestConfig(
+    /// Recommended default profile for most apps.
+    ///
+    /// Includes:
+    /// - `Accept: application/json`
+    /// - `timeout = 30` seconds
+    /// - `RetryPolicy.standard`
+    public static let standard = SwiftRestConfig(
         baseHeaders: ["accept": "application/json"],
         timeout: 30,
-        retryPolicy: .beginner
+        retryPolicy: .standard
     )
+
+    /// Backward-compatible alias for `standard`.
+    @available(*, deprecated, renamed: "standard")
+    public static let beginner = standard
 }
 
 /// Source-level version marker for this release line.
 public enum SwiftRestVersion {
-    public static let current = "2.0.0"
+    public static let current = "2.0.1"
 }

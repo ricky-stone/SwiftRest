@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.0.1 - 2026-02-14
+
+### Added
+- Header-friendly typed convenience methods: `getResponse`, `postResponse`, `putResponse`, `patchResponse`, `deleteResponse`.
+
+### Changed
+- Preferred default config naming is now `SwiftRestConfig.standard` and `RetryPolicy.standard`.
+- `SwiftRestClient` now defaults to `.standard` when no config is passed.
+- README now includes explicit header-reading patterns, default config behavior, and license/author/acknowledgment guidance.
+
+### Compatibility
+- `.beginner` remains available as a deprecated alias for `.standard`.
+
 ## 2.0.0 - 2026-02-14
 
 ### Added

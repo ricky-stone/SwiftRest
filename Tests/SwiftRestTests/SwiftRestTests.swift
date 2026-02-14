@@ -115,3 +115,14 @@ struct Dummy: Codable, Equatable, Sendable {
         #expect(Bool(false))
     }
 }
+
+@Test func testStandardConfigDefaultsAndVersionMarker() throws {
+    #expect(SwiftRestConfig.standard.baseHeaders["accept"] == "application/json")
+    #expect(SwiftRestConfig.standard.timeout == 30)
+    #expect(SwiftRestConfig.standard.retryPolicy.maxAttempts == 3)
+    #expect(SwiftRestConfig.standard.retryPolicy.baseDelay == 0.5)
+    #expect(RetryPolicy.standard.retryableStatusCodes.contains(429))
+    #expect(SwiftRestVersion.current == "2.0.1")
+
+    _ = try SwiftRestClient("https://api.example.com")
+}

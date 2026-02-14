@@ -8,7 +8,7 @@ public actor SwiftRestClient: RestClientType {
 
     public init(
         _ url: String,
-        config: SwiftRestConfig = .beginner,
+        config: SwiftRestConfig = .standard,
         session: URLSession = .shared
     ) throws {
         guard
@@ -187,6 +187,26 @@ public actor SwiftRestClient: RestClientType {
         return try await execute(request, as: type)
     }
 
+    /// Executes `GET` and returns both metadata and decoded payload.
+    public func getResponse<T: Decodable & Sendable>(
+        _ path: String,
+        as type: T.Type = T.self,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async throws -> SwiftRestResponse<T> {
+        _ = type
+        let request = makeRequest(
+            path: path,
+            method: .get,
+            parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await executeAsyncWithResponse(request)
+    }
+
     public func deleteRaw(
         _ path: String,
         parameters: [String: String] = [:],
@@ -222,6 +242,26 @@ public actor SwiftRestClient: RestClientType {
             retryPolicy: nil
         )
         return try await execute(request, as: type)
+    }
+
+    /// Executes `DELETE` and returns both metadata and decoded payload.
+    public func deleteResponse<T: Decodable & Sendable>(
+        _ path: String,
+        as type: T.Type = T.self,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async throws -> SwiftRestResponse<T> {
+        _ = type
+        let request = makeRequest(
+            path: path,
+            method: .delete,
+            parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await executeAsyncWithResponse(request)
     }
 
     public func postRaw<Body: Encodable & Sendable>(
@@ -265,6 +305,28 @@ public actor SwiftRestClient: RestClientType {
         return try await execute(request, as: type)
     }
 
+    /// Executes `POST` and returns both metadata and decoded payload.
+    public func postResponse<Body: Encodable & Sendable, Response: Decodable & Sendable>(
+        _ path: String,
+        body: Body,
+        as type: Response.Type = Response.self,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async throws -> SwiftRestResponse<Response> {
+        _ = type
+        let request = try makeRequest(
+            path: path,
+            method: .post,
+            body: body,
+            parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await executeAsyncWithResponse(request)
+    }
+
     public func putRaw<Body: Encodable & Sendable>(
         _ path: String,
         body: Body,
@@ -306,6 +368,28 @@ public actor SwiftRestClient: RestClientType {
         return try await execute(request, as: type)
     }
 
+    /// Executes `PUT` and returns both metadata and decoded payload.
+    public func putResponse<Body: Encodable & Sendable, Response: Decodable & Sendable>(
+        _ path: String,
+        body: Body,
+        as type: Response.Type = Response.self,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async throws -> SwiftRestResponse<Response> {
+        _ = type
+        let request = try makeRequest(
+            path: path,
+            method: .put,
+            body: body,
+            parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await executeAsyncWithResponse(request)
+    }
+
     public func patchRaw<Body: Encodable & Sendable>(
         _ path: String,
         body: Body,
@@ -345,6 +429,28 @@ public actor SwiftRestClient: RestClientType {
             retryPolicy: nil
         )
         return try await execute(request, as: type)
+    }
+
+    /// Executes `PATCH` and returns both metadata and decoded payload.
+    public func patchResponse<Body: Encodable & Sendable, Response: Decodable & Sendable>(
+        _ path: String,
+        body: Body,
+        as type: Response.Type = Response.self,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async throws -> SwiftRestResponse<Response> {
+        _ = type
+        let request = try makeRequest(
+            path: path,
+            method: .patch,
+            body: body,
+            parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await executeAsyncWithResponse(request)
     }
 
     // MARK: - Request Builders
