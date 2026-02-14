@@ -1,60 +1,117 @@
+import Foundation
 import Testing
 @testable import SwiftRest
 
-import Foundation
+struct Dummy: Codable, Equatable, Sendable {
+    let id: Int
+    let name: String
+}
 
-// MARK: - JSON Helper Tests
-
-@Test func testJsonHelperEncodingDecoding() async throws {
-    // A simple model for testing JSON encoding and decoding.
-    struct Dummy: Codable, Equatable, Sendable {
-        let id: Int
-        let name: String
-    }
-    
+@Test func testJsonHelperEncodingDecoding() throws {
     let dummy = Dummy(id: 1, name: "Alice")
-    
-    // Encode the dummy model to a JSON string.
-    let jsonString = try Json.toString(object: dummy)
-    
-    // Decode the JSON string back into a Dummy instance.
-    let decoded: Dummy = try Json.parse(data: jsonString)
-    
-    // Assert that the decoded properties match the original values.
-    #expect(decoded.id == dummy.id)
-    #expect(decoded.name == dummy.name)
+
+    let jsonData = try Json.toData(object: dummy)
+    let decoded: Dummy = try Json.parse(data: jsonData)
+
+    #expect(decoded == dummy)
 }
 
-// MARK: - SwiftRestRequest Tests
+@Test func testSwiftRestRequestMutatingAndChainableStyles() throws {
+    var mutating = SwiftRestRequest(path: "users", method: .post)
+    mutating.addHeader("Content-Type", "application/json")
+    mutating.addParameter("page", "1")
+    try mutating.addJsonBody(["name": "Ricky"])
+    mutating.addAuthToken("token")
+    mutating.configureRetries(maxRetries: 2, retryDelay: 0.25)
 
-@Test func testSwiftRestRequestConfiguration() async throws {
-    // Create a request and configure various properties.
-    var request = SwiftRestRequest(path: "endpoint", method: .post)
-    request.addHeader("Content-Type", "application/json")
-    request.addParameter("q", "test")
-    try request.addJsonBody(["key": "value"])
-    request.addAuthToken("sampleToken")
-    request.configureRetries(maxRetries: 3, retryDelay: 1.0)
-    
-    // Assert that the properties are set correctly.
-    #expect(request.headers?["Content-Type"] == "application/json")
-    #expect(request.parameters?["q"] == "test")
-    #expect(request.jsonBody?.contains("key") == true)
-    #expect(request.authToken == "sampleToken")
-    #expect(request.maxRetries == 3)
-    #expect(request.retryDelay == 1.0)
+    #expect(mutating.headers["content-type"] == "application/json")
+    #expect(mutating.parameters["page"] == "1")
+    #expect(mutating.body != nil)
+    #expect(mutating.authToken == "token")
+    #expect(mutating.retryPolicy?.maxAttempts == 3)
+
+    let chainable = SwiftRestRequest.get("users")
+        .header("X-App", "Demo")
+        .parameter("page", "2")
+        .retries(maxRetries: 1, retryDelay: 0.1)
+
+    #expect(chainable.headers["x-app"] == "Demo")
+    #expect(chainable.parameters["page"] == "2")
+    #expect(chainable.retryPolicy?.maxAttempts == 2)
 }
 
-// MARK: - SwiftRestClient Initialization Test
+@Test func testRawResponseHelpers() throws {
+    let body = #"{"id":1,"name":"Alice"}"#.data(using: .utf8)!
+    let response = SwiftRestRawResponse(
+        statusCode: 200,
+        data: nil,
+        rawData: body,
+        headers: ["Content-Type": "application/json"]
+    )
 
-@Test func testSwiftRestClientInvalidBaseURL() async throws {
+    #expect(response.isSuccess)
+    #expect(response.header("content-type") == "application/json")
+    #expect(response.text() == #"{"id":1,"name":"Alice"}"#)
+
+    let decoded: Dummy = try response.decodeBody(Dummy.self)
+    #expect(decoded == Dummy(id: 1, name: "Alice"))
+
+    let object = try response.jsonObject() as? [String: Any]
+    #expect(object?["name"] as? String == "Alice")
+}
+
+@Test func testMockRestClientDecodingAndHTTPError() async throws {
+    let okClient = MockRestClient { _ in
+        SwiftRestRawResponse(
+            statusCode: 200,
+            data: nil,
+            rawData: #"{"id":2,"name":"Bob"}"#.data(using: .utf8)!,
+            headers: ["Content-Type": "application/json"]
+        )
+    }
+
+    let okRequest = SwiftRestRequest(path: "users/2")
+    let okResponse: SwiftRestResponse<Dummy> = try await okClient.executeAsyncWithResponse(okRequest)
+    #expect(okResponse.data == Dummy(id: 2, name: "Bob"))
+
+    let failingClient = MockRestClient { _ in
+        SwiftRestRawResponse(
+            statusCode: 404,
+            data: nil,
+            rawData: #"{"reason":"Not found"}"#.data(using: .utf8)!,
+            headers: ["Content-Type": "application/json"]
+        )
+    }
+
     do {
-        // An empty string is used to guarantee failure in URL initialization.
-        _ = try SwiftRestClient(url: "")
-        // If no error is thrown, this assertion fails.
+        _ = try await failingClient.executeRaw(okRequest)
         #expect(Bool(false))
+    } catch let error as SwiftRestClientError {
+        switch error {
+        case .httpError(let details):
+            #expect(details.statusCode == 404)
+            #expect(details.rawPayload?.contains("Not found") == true)
+        default:
+            #expect(Bool(false))
+        }
+    }
+
+    let raw = try await failingClient.executeRaw(okRequest, allowHTTPError: true)
+    #expect(raw.statusCode == 404)
+}
+
+@Test func testSwiftRestClientInvalidBaseURL() {
+    do {
+        _ = try SwiftRestClient("not a url")
+        #expect(Bool(false))
+    } catch let error as SwiftRestClientError {
+        switch error {
+        case .invalidBaseURL:
+            #expect(Bool(true))
+        default:
+            #expect(Bool(false))
+        }
     } catch {
-        // An error is expected, so we assert true.
-        #expect(Bool(true))
+        #expect(Bool(false))
     }
 }

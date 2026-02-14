@@ -1,72 +1,99 @@
-//
-//  Swift Rest
-//  Created by Ricky Stone on 22/03/2025.
-//
-
 import Foundation
 
-/// A generic structure representing a REST response that can be decoded into a model of type `T`.
-///
-/// This structure encapsulates key elements of an HTTP response, including the status code,
-/// optional decoded data, raw response string, headers, response time, the final URL after redirection,
-/// and the MIME type of the response content.
-///
-/// - Note: The generic type `T` must conform to both `Decodable` and `Sendable`.
+/// A convenience alias used when you only need raw headers and payload.
+public typealias SwiftRestRawResponse = SwiftRestResponse<NoContent>
+
+/// Represents an HTTP response and optional decoded payload.
 public struct SwiftRestResponse<T: Decodable & Sendable>: Sendable {
-    
-    /// The HTTP status code of the response.
     public private(set) var statusCode: Int
-    
-    /// The decoded response data of type `T`, if available.
     public private(set) var data: T?
-    
-    /// The raw response string received from the server.
-    public private(set) var rawValue: String?
-    
-    /// A dictionary containing the HTTP headers from the response.
-    public private(set) var headers: [String: String]?
-    
-    /// The time interval (in seconds) it took to receive the response.
+    public private(set) var rawData: Data
+    public private(set) var headers: HTTPHeaders
     public private(set) var responseTime: TimeInterval?
-    
-    /// The final URL after any redirections.
     public private(set) var finalURL: URL?
-    
-    /// The MIME type of the response content.
     public private(set) var mimeType: String?
-    
-    /// A computed property indicating whether the response is considered successful.
-    ///
-    /// A response is considered successful if the HTTP status code is within the range 200 to 299.
+
     public var isSuccess: Bool {
-        return (200...299).contains(statusCode)
+        (200...299).contains(statusCode)
     }
-    
-    /// Initializes a new instance of `SwiftRestResponse` with the provided values.
-    ///
-    /// - Parameters:
-    ///   - statusCode: The HTTP status code from the response.
-    ///   - data: The decoded response data of type `T`. Defaults to `nil`.
-    ///   - rawValue: The raw response string. Defaults to `nil`.
-    ///   - headers: The HTTP headers from the response. Defaults to `nil`.
-    ///   - responseTime: The duration (in seconds) it took to get the response. Defaults to `nil`.
-    ///   - finalURL: The final URL after following any redirects. Defaults to `nil`.
-    ///   - mimeType: The MIME type of the response content. Defaults to `nil`.
-    init(
+
+    /// UTF-8 string representation of the raw body, when available.
+    public var rawValue: String? {
+        String(data: rawData, encoding: .utf8)
+    }
+
+    public init(
         statusCode: Int,
         data: T? = nil,
-        rawValue: String? = nil,
-        headers: [String: String]? = nil,
+        rawData: Data = Data(),
+        headers: HTTPHeaders = HTTPHeaders(),
         responseTime: TimeInterval? = nil,
         finalURL: URL? = nil,
         mimeType: String? = nil
     ) {
         self.statusCode = statusCode
         self.data = data
-        self.rawValue = rawValue
+        self.rawData = rawData
         self.headers = headers
         self.responseTime = responseTime
         self.finalURL = finalURL
         self.mimeType = mimeType
+    }
+
+    /// Returns the first value for a header name.
+    public func header(_ name: String) -> String? {
+        headers[name]
+    }
+
+    /// Returns the body as text with a custom encoding.
+    public func text(encoding: String.Encoding = .utf8) -> String? {
+        String(data: rawData, encoding: encoding)
+    }
+
+    /// Decodes the body into the requested type.
+    public func decodeBody<U: Decodable & Sendable>(
+        _ type: U.Type = U.self,
+        using decoder: JSONDecoder = JSONDecoder()
+    ) throws -> U {
+        guard !rawData.isEmpty else {
+            throw SwiftRestClientError.emptyResponseBody(expectedType: String(describing: U.self))
+        }
+
+        do {
+            return try decoder.decode(U.self, from: rawData)
+        } catch {
+            throw SwiftRestClientError.decodingError(underlying: ErrorContext(error))
+        }
+    }
+
+    /// Parses the body as a JSON object (`Dictionary`, `Array`, etc.).
+    public func jsonObject() throws -> Any {
+        guard !rawData.isEmpty else {
+            throw SwiftRestClientError.emptyResponseBody(expectedType: "JSON")
+        }
+
+        do {
+            return try JSONSerialization.jsonObject(with: rawData)
+        } catch {
+            throw SwiftRestClientError.decodingError(underlying: ErrorContext(error))
+        }
+    }
+
+    /// Returns a pretty-printed JSON string when the body contains valid JSON.
+    public func prettyPrintedJSON() throws -> String {
+        let object = try jsonObject()
+
+        do {
+            let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+            guard let text = String(data: data, encoding: .utf8) else {
+                throw JsonError.encodingFailed
+            }
+            return text
+        } catch {
+            if let clientError = error as? SwiftRestClientError {
+                throw clientError
+            }
+            throw SwiftRestClientError.decodingError(underlying: ErrorContext(error))
+        }
     }
 }

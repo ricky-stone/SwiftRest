@@ -1,153 +1,177 @@
-# SwiftRest
+# SwiftRest (v2)
 
-[![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fricky-stone%2FSwiftRest%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/ricky-stone/SwiftRest)
-[![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fricky-stone%2FSwiftRest%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/ricky-stone/SwiftRest)
+SwiftRest is a lightweight **Swift 6** REST client focused on beginner ergonomics and actor-based concurrency safety.
 
-SwiftRest is a lightweight, easy-to-use Swift package for building REST API clients. It provides a flexible and robust solution for sending HTTP requests with built-in support for retries, base headers, and per-request authorization tokens—all while using a consistent JSON encoding/decoding strategy.
+## Why v2
 
----
-
-## Features
-
-- **Simple API:** Easily construct and execute HTTP requests.
-- **Retry Support:** Configure automatic retry behavior for transient errors.
-- **Base Headers:** Define client-level headers that apply to every request.
-- **Authorization:** Add per-request Bearer tokens for secure endpoints.
-- **JSON Handling:** Built-in JSON encoding and decoding using a dedicated JSON helper.
-- **Comprehensive Error Handling:** Detailed error types for troubleshooting.
-
----
+- `SwiftRestClient` stays an `actor` for safe concurrent use.
+- Raw responses are first-class (`status`, `headers`, `payload`).
+- Typed decoding is simple and available in multiple styles.
+- Retry behavior is configurable but easy by default.
 
 ## Requirements
 
-- **Swift:** 5.5+
-- **Platforms:** iOS 13+, macOS 10.15+, or equivalent
-- **Xcode:** 13+
-
----
+- Swift 6.0+
+- iOS 15+
+- macOS 12+
 
 ## Installation
 
-Add SwiftRest to your project using the Swift Package Manager.
+Add this package with Swift Package Manager:
 
-1. In Xcode, navigate to **File > Swift Packages > Add Package Dependency…**
-2. Enter the repository URL: https://github.com/ricky-stone/SwiftRest.git
-3. Follow the prompts to complete the integration.
+- URL: `https://github.com/ricky-stone/SwiftRest.git`
 
----
-
-## Usage
-
-### Importing the Package
-
-Begin by importing SwiftRest in your Swift file:
+## Quick Start
 
 ```swift
 import SwiftRest
-```
 
-Creating a Request
-
-Create a SwiftRestRequest instance by specifying the endpoint path and HTTP method. Then, customize the request by adding headers, URL parameters, a JSON body, an authorization token, and retry configurations as needed.
-
-```swift
-// Create a GET request to the "api/v1/users" endpoint
-var request = SwiftRestRequest(path: "api/v1/users", method: .get)
-
-// Optionally add a custom header
-request.addHeader("Custom-Header", "Value")
-
-// Optionally add URL parameters
-request.addParameter("page", "1")
-
-// Optionally add an authorization token (will be sent as a Bearer token)
-request.addAuthToken("your_auth_token_here")
-
-// Optionally configure retry behavior (3 attempts with a 0.5-second delay between retries)
-request.configureRetries(maxRetries: 3, retryDelay: 0.5)
-```
-
-Initializing the REST Client
-
-Initialize the SwiftRestClient with your base URL. You can also specify base headers that apply to every request made through this client.
-
-```swift
-let client = SwiftRestClient("https://api.example.com")
-```
-
-Executing a Request
-
-SwiftRest provides two methods for executing requests asynchronously:
-
-1. Executing with a Response
-
-This method decodes the response into a specified type.
-
-```swift
-// Define a model for the expected response. The model must conform to Decodable & Sendable.
 struct User: Decodable, Sendable {
     let id: Int
     let name: String
 }
 
-// Execute the request and decode the response.
-    do {
-        let response: SwiftRestResponse<User> = try await client.executeAsyncWithResponse(request)
-        if response.isSuccess, let user = response.data {
-            print("User Name: \(user.name)")
-        } else {
-            print("Request failed with status code: \(response.statusCode)")
-        }
-    } catch {
-        print("Error executing request: \(error)")
-    }
+let client = try SwiftRestClient(
+    "https://api.example.com",
+    config: .beginner
+)
+
+let user: User = try await client.get("users/1")
+print(user.name)
 ```
 
-2. Executing without a Response
+## Decoding: All Common Styles
 
-For requests that do not expect any response payload.
+### 1) Inferred from variable type
 
 ```swift
-    do {
-        try await client.executeAsyncWithoutResponse(request)
-        print("Request executed successfully")
-    } catch {
-        print("Error executing request: \(error)")
-    }
+let user: User = try await client.get("users/1")
 ```
 
-Error Handling
+### 2) Explicit type with `as:`
 
-SwiftRest defines a set of error types in `SwiftRestClientError` for various failure scenarios:
-- **invalidBaseURL:** The provided base URL is invalid.
-- **invalidURLComponents:** URL components could not be properly constructed.
-- **invalidFinalURL:** The final URL after appending query parameters is invalid.
-- **invalidHTTPResponse:** The HTTP response is missing or malformed.
-- **missingContentType:** The expected “Content-Type” header is missing.
-- **retryLimitReached:** The maximum number of retry attempts has been reached without success.
+```swift
+let user = try await client.get("users/1", as: User.self)
+```
 
-⸻
+### 3) Build request object + decode directly
 
-Contributing
+```swift
+let request = SwiftRestRequest(path: "users/1", method: .get)
+let user = try await client.execute(request, as: User.self)
+```
 
-Contributions are welcome! If you have suggestions, bug fixes, or improvements, please open an issue or submit a pull request on GitHub.
+### 4) Build request object + keep metadata + decoded payload
 
-⸻
+```swift
+let request = SwiftRestRequest(path: "users/1", method: .get)
+let response: SwiftRestResponse<User> = try await client.executeAsyncWithResponse(request)
 
-License
+print(response.statusCode)
+print(response.headers["content-type"] ?? "n/a")
+print(response.data?.name ?? "none")
+```
 
-This project is licensed under the MIT License.
+## Read Headers and Raw Payload Easily
 
-⸻
+```swift
+let raw = try await client.getRaw("users/1")
 
-Acknowledgments
+print(raw.statusCode)
+print(raw.headers["content-type"] ?? "n/a")
+print(raw.headers.values(for: "set-cookie"))
+print(raw.text() ?? "")
+```
 
-Thank you for using SwiftRest! If you find this package useful, please consider starring the repository and sharing it with your community.
+Parse payload manually if you want:
 
-⸻
+```swift
+let user = try raw.decodeBody(User.self)
+let json = try raw.jsonObject()
+let pretty = try raw.prettyPrintedJSON()
+```
 
-Happy coding!
+## POST / PUT / PATCH / DELETE
 
+```swift
+struct CreateUser: Encodable, Sendable { let name: String }
 
+let created: User = try await client.post(
+    "users",
+    body: CreateUser(name: "Ricky")
+)
 
+let updated: User = try await client.put(
+    "users/1",
+    body: CreateUser(name: "Ricky Stone")
+)
 
+let patched: User = try await client.patch(
+    "users/1",
+    body: ["name": "Ricky S."]
+)
+
+let _: NoContent = try await client.delete("users/1")
+```
+
+## Request Builder Styles
+
+Mutating style:
+
+```swift
+var request = SwiftRestRequest(path: "users", method: .get)
+request.addHeader("X-App", "Demo")
+request.addParameter("page", "1")
+request.configureRetries(maxRetries: 2, retryDelay: 0.5)
+```
+
+Chainable style:
+
+```swift
+let request = SwiftRestRequest.get("users")
+    .header("X-App", "Demo")
+    .parameter("page", "1")
+    .retries(maxRetries: 2, retryDelay: 0.5)
+```
+
+## Configuration
+
+```swift
+let config = SwiftRestConfig(
+    baseHeaders: ["accept": "application/json"],
+    timeout: 20,
+    retryPolicy: RetryPolicy(
+        maxAttempts: 3,
+        baseDelay: 0.5
+    )
+)
+
+let client = try SwiftRestClient("https://api.example.com", config: config)
+```
+
+## Error Handling
+
+```swift
+do {
+    let user: User = try await client.get("users/does-not-exist")
+    print(user)
+} catch let error as SwiftRestClientError {
+    print(error.userMessage)
+
+    if case .httpError(let details) = error {
+        print(details.statusCode)
+        print(details.headers["content-type"] ?? "n/a")
+        print(details.rawPayload ?? "")
+    }
+}
+```
+
+## Concurrency Safety Notes
+
+- `SwiftRestClient` is an `actor`.
+- Public request/response/config models are `Sendable`.
+- APIs are built for `async/await` usage in Swift 6 projects.
+
+## Version
+
+Current source version marker: `SwiftRestVersion.current == "2.0.0"`

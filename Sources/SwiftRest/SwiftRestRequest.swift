@@ -1,100 +1,178 @@
-//
-//  Swift Rest
-//  Created by Ricky Stone on 22/03/2025.
-//
-
 import Foundation
 
-/// A structure representing a REST request.
-///
-/// This encapsulates the endpoint path, HTTP method, headers, URL parameters, JSON body, and retry configuration.
-/// It also provides an optional authorization token that, when provided, is automatically added as a Bearer token.
+/// Represents a request to execute against a REST API.
 public struct SwiftRestRequest: Sendable {
-    
-    /// The endpoint path relative to the base URL.
     public private(set) var path: String
-    
-    /// The HTTP method for the request.
     public private(set) var method: HTTPMethod
-    
-    /// Optional headers to include in the request.
-    public private(set) var headers: [String: String]?
-    
-    /// Optional URL parameters appended as query items.
-    public private(set) var parameters: [String: String]?
-    
-    /// Optional JSON body of the request as a string.
-    public private(set) var jsonBody: String?
-    
-    /// The maximum number of retry attempts for the request.
-    ///
-    /// Defaults to `0`, meaning no retries will be performed unless explicitly configured.
-    public private(set) var maxRetries: Int = 0
-    
-    /// The delay between retry attempts (in seconds).
-    ///
-    /// Defaults to `0`, meaning no delay (and effectively no retries) unless explicitly configured.
-    public private(set) var retryDelay: TimeInterval = 0
-    
-    /// Optional authorization token.
-    ///
-    /// If provided, it will be added as a Bearer token in the `Authorization` header.
+    public private(set) var headers: HTTPHeaders
+    public private(set) var parameters: [String: String]
+    public private(set) var body: Data?
     public private(set) var authToken: String?
-    
-    /// Initializes a new REST request with the specified endpoint path and HTTP method.
-    ///
-    /// - Parameters:
-    ///   - path: The endpoint path relative to the base URL.
-    ///   - method: The HTTP method (e.g. `.get`, `.post`).
-    public init(path: String, method: HTTPMethod) {
+    public private(set) var retryPolicy: RetryPolicy?
+
+    public init(path: String, method: HTTPMethod = .get) {
         self.path = path
         self.method = method
+        self.headers = HTTPHeaders()
+        self.parameters = [:]
+        self.body = nil
+        self.authToken = nil
+        self.retryPolicy = nil
     }
-    
-    /// Adds an HTTP header to the request.
-    ///
-    /// - Parameters:
-    ///   - key: The header field name.
-    ///   - value: The header field value.
+
+    // MARK: - Mutating API
+
     public mutating func addHeader(_ key: String, _ value: String) {
-        if headers == nil { headers = [:] }
-        headers?[key] = value
+        headers.set(value, for: key)
     }
-    
-    /// Adds a URL parameter to the request.
-    ///
-    /// - Parameters:
-    ///   - key: The parameter name.
-    ///   - value: The parameter value.
+
+    public mutating func addHeaders(_ values: [String: String]) {
+        for (key, value) in values {
+            headers.set(value, for: key)
+        }
+    }
+
     public mutating func addParameter(_ key: String, _ value: String) {
-        if parameters == nil { parameters = [:] }
-        parameters?[key] = value
+        parameters[key] = value
     }
-    
-    /// Sets the JSON body of the request by encoding an Encodable object.
-    ///
-    /// - Parameter object: The object to be encoded as JSON.
-    /// - Throws: An error if encoding fails.
-    public mutating func addJsonBody<T: Encodable>(_ object: T) throws {
-        self.jsonBody = try Json.toString(object: object)
+
+    public mutating func addParameters(_ values: [String: String]) {
+        for (key, value) in values {
+            parameters[key] = value
+        }
     }
-    
-    /// Configures the retry behavior for the request.
-    ///
-    /// - Parameters:
-    ///   - maxRetries: The maximum number of retry attempts.
-    ///   - retryDelay: The delay between retry attempts, in seconds.
-    public mutating func configureRetries(maxRetries: Int, retryDelay: TimeInterval) {
-        self.maxRetries = maxRetries
-        self.retryDelay = retryDelay
+
+    public mutating func addJsonBody<T: Encodable & Sendable>(
+        _ object: T,
+        using encoder: JSONEncoder = JSONEncoder()
+    ) throws {
+        self.body = try encoder.encode(object)
+        if headers["content-type"] == nil {
+            headers.set("application/json", for: "Content-Type")
+        }
     }
-    
-    /// Adds an authorization token to the request.
-    ///
-    /// The token will be automatically added as a Bearer token in the `Authorization` header.
-    ///
-    /// - Parameter token: The authorization token.
+
+    public mutating func addRawBody(_ data: Data, contentType: String? = nil) {
+        self.body = data
+        if let contentType {
+            headers.set(contentType, for: "Content-Type")
+        }
+    }
+
+    public mutating func addRawBody(_ string: String, contentType: String? = "text/plain") {
+        self.body = string.data(using: .utf8)
+        if let contentType {
+            headers.set(contentType, for: "Content-Type")
+        }
+    }
+
     public mutating func addAuthToken(_ token: String) {
         self.authToken = token
+    }
+
+    /// Backward-compatible retry configuration.
+    ///
+    /// `maxRetries` means retries after the first attempt.
+    public mutating func configureRetries(maxRetries: Int, retryDelay: TimeInterval) {
+        let maxAttempts = max(1, maxRetries + 1)
+        self.retryPolicy = RetryPolicy(
+            maxAttempts: maxAttempts,
+            baseDelay: retryDelay,
+            backoffMultiplier: 1,
+            maxDelay: retryDelay,
+            retryableStatusCodes: [408, 429, 500, 502, 503, 504],
+            retryOnNetworkErrors: true
+        )
+    }
+
+    public mutating func configureRetryPolicy(_ policy: RetryPolicy) {
+        self.retryPolicy = policy
+    }
+
+    // MARK: - Chainable API
+
+    public func header(_ key: String, _ value: String) -> Self {
+        var copy = self
+        copy.addHeader(key, value)
+        return copy
+    }
+
+    public func headers(_ values: [String: String]) -> Self {
+        var copy = self
+        copy.addHeaders(values)
+        return copy
+    }
+
+    public func parameter(_ key: String, _ value: String) -> Self {
+        var copy = self
+        copy.addParameter(key, value)
+        return copy
+    }
+
+    public func parameters(_ values: [String: String]) -> Self {
+        var copy = self
+        copy.addParameters(values)
+        return copy
+    }
+
+    public func jsonBody<T: Encodable & Sendable>(
+        _ object: T,
+        using encoder: JSONEncoder = JSONEncoder()
+    ) throws -> Self {
+        var copy = self
+        try copy.addJsonBody(object, using: encoder)
+        return copy
+    }
+
+    public func rawBody(_ data: Data, contentType: String? = nil) -> Self {
+        var copy = self
+        copy.addRawBody(data, contentType: contentType)
+        return copy
+    }
+
+    public func rawBody(_ text: String, contentType: String? = "text/plain") -> Self {
+        var copy = self
+        copy.addRawBody(text, contentType: contentType)
+        return copy
+    }
+
+    public func authToken(_ token: String) -> Self {
+        var copy = self
+        copy.addAuthToken(token)
+        return copy
+    }
+
+    public func retries(maxRetries: Int, retryDelay: TimeInterval) -> Self {
+        var copy = self
+        copy.configureRetries(maxRetries: maxRetries, retryDelay: retryDelay)
+        return copy
+    }
+
+    public func retryPolicy(_ policy: RetryPolicy) -> Self {
+        var copy = self
+        copy.configureRetryPolicy(policy)
+        return copy
+    }
+}
+
+public extension SwiftRestRequest {
+    static func get(_ path: String) -> SwiftRestRequest {
+        SwiftRestRequest(path: path, method: .get)
+    }
+
+    static func post(_ path: String) -> SwiftRestRequest {
+        SwiftRestRequest(path: path, method: .post)
+    }
+
+    static func put(_ path: String) -> SwiftRestRequest {
+        SwiftRestRequest(path: path, method: .put)
+    }
+
+    static func patch(_ path: String) -> SwiftRestRequest {
+        SwiftRestRequest(path: path, method: .patch)
+    }
+
+    static func delete(_ path: String) -> SwiftRestRequest {
+        SwiftRestRequest(path: path, method: .delete)
     }
 }

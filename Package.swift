@@ -24,5 +24,8 @@ let package = Package(
             name: "SwiftRestTests",
             dependencies: ["SwiftRest"]
         ),
+    ],
+    swiftLanguageModes: [
+        .v6
     ]
 )

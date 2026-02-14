@@ -1,262 +1,539 @@
-//
-//  Swift Rest
-//  Created by Ricky Stone on 22/03/2025.
-//
-
 import Foundation
 
-/// A client for executing asynchronous REST requests.
-///
-/// Supports:
-/// - Automatic retry on failure
-/// - Base URL and path/query construction
-/// - Request-specific headers and JSON body
-/// - Bearer token authorization
-/// - JSON decoding into `Decodable` types
+/// A concurrency-safe client for executing async REST requests.
 public actor SwiftRestClient: RestClientType {
-    
-    /// The base URL string used for all requests.
-    private let url: String
-        
-    /// Initializes a new REST client with the specified base URL.
-    ///
-    /// - Parameter url: The base URL to which all request paths will be appended.
-    public init(_ url: String) {
-        self.url = url
-    }
-    
-    // MARK: - Public API
-    
-    /// Executes an HTTP request and decodes the JSON response to the specified type.
-    ///
-    /// - Parameter httpRequest: A `SwiftRestRequest` defining method, path, headers,
-    ///   query parameters, JSON body, retry policy, and auth token.
-    /// - Returns: A `SwiftRestResponse<T>` containing status, headers, decoded payload,
-    ///   raw JSON, timing, and final URL.
-    /// - Throws:
-    ///   - `SwiftRestClientError.invalidBaseURL` if the base URL cannot be parsed.
-    ///   - `SwiftRestClientError.httpError` for any non-2xx HTTP response, with full
-    ///     status code and payload.
-    ///   - `SwiftRestClientError.networkError` or `SwiftRestClientError.decodingError` if
-    ///     a network or decoding issue occurs.
-    @discardableResult
-    public func executeAsyncWithResponse<T: Decodable>(
-        _ httpRequest: SwiftRestRequest
-    ) async throws -> SwiftRestResponse<T> {
-        let maxRetries = httpRequest.maxRetries
-        let retryDelay = httpRequest.retryDelay
-        var attempt = 0
-        var lastError: Error?
-        
-        // Ensure base URL is valid before starting retries
-        guard let baseURL = URL(string: url) else {
+    private let baseURL: URL
+    private let config: SwiftRestConfig
+    private let session: URLSession
+
+    public init(
+        _ url: String,
+        config: SwiftRestConfig = .beginner,
+        session: URLSession = .shared
+    ) throws {
+        guard
+            let parsed = URL(string: url),
+            let scheme = parsed.scheme?.lowercased(),
+            ["http", "https"].contains(scheme),
+            parsed.host != nil
+        else {
             throw SwiftRestClientError.invalidBaseURL(url)
         }
-        
-        // Retry loop: attempt up to `maxRetries` on transient failures
-        while attempt <= maxRetries {
+
+        self.baseURL = parsed
+        self.config = config
+        self.session = session
+    }
+
+    // MARK: - Low-level API
+
+    /// Executes a request and returns a raw response.
+    ///
+    /// If `allowHTTPError` is `false`, non-2xx responses throw `SwiftRestClientError.httpError`.
+    public func executeRaw(
+        _ request: SwiftRestRequest,
+        allowHTTPError: Bool = false
+    ) async throws -> SwiftRestRawResponse {
+        let policy = effectiveRetryPolicy(for: request)
+
+        var attempt = 1
+        var lastError: SwiftRestClientError?
+
+        while attempt <= policy.maxAttempts {
             do {
-                // Build URL with path and query parameters
-                let requestURL = try buildRequestURL(for: httpRequest, baseURL: baseURL)
-                // Construct URLRequest (method, headers, token, body)
-                let request = buildURLRequest(for: httpRequest, requestURL: requestURL)
-                // Record start time for performance metrics
+                let requestURL = try buildRequestURL(for: request)
+                let urlRequest = buildURLRequest(for: request, requestURL: requestURL)
+
                 let startTime = Date()
-                // Perform network call
-                let (data, urlResponse) = try await URLSession.shared.data(for: request)
-                // Process status code, headers, JSON decode if 2xx
-                let response = try processResponse(
-                    data,
-                    urlResponse,
-                    startTime,
-                    type: T.self
-                )
-                return response
+                let (data, urlResponse) = try await session.data(for: urlRequest)
+                let raw = try processRawResponse(data, urlResponse, startTime)
+
+                if !allowHTTPError, !raw.isSuccess {
+                    throw SwiftRestClientError.httpError(makeErrorResponse(from: raw))
+                }
+
+                return raw
+            } catch let cancellation as CancellationError {
+                throw cancellation
             } catch {
-                // Capture last error for throwing if all retries fail
-                lastError = error
-            }
-            
-            attempt += 1
-            // Delay before next retry if attempts remain
-            if attempt <= maxRetries {
-                try await Task.sleep(nanoseconds: UInt64(retryDelay * 1_000_000_000))
+                let normalized = normalize(error)
+                lastError = normalized
+
+                if attempt >= policy.maxAttempts || !shouldRetry(normalized, policy: policy) {
+                    throw normalized
+                }
+
+                let delay = retryDelay(for: attempt, policy: policy, error: normalized)
+                if delay > 0 {
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                }
+
+                attempt += 1
             }
         }
-        
-        // If retries exhausted, rethrow the last encountered error
-        if let error = lastError {
-            throw error
+
+        if let lastError {
+            throw lastError
         }
-        // Fallback if no error was captured
+
         throw SwiftRestClientError.retryLimitReached
     }
-    
-    /// Executes an HTTP request when no response payload is expected.
-    ///
-    /// Wraps `executeAsyncWithResponse` with `T = NoContent` and discards the result.
-    ///
-    /// - Parameter request: A `SwiftRestRequest` defining the call.
-    /// - Throws: Any error from `executeAsyncWithResponse`.
-    public func executeAsyncWithoutResponse(_ request: SwiftRestRequest) async throws {
-        // Explicitly bind generic to `NoContent` to satisfy type inference
-        let _: SwiftRestResponse<NoContent> = try await executeAsyncWithResponse(request)
+
+    /// Executes a request and decodes the response body into `T`.
+    @discardableResult
+    public func executeAsyncWithResponse<T: Decodable & Sendable>(
+        _ request: SwiftRestRequest
+    ) async throws -> SwiftRestResponse<T> {
+        let raw = try await executeRaw(request)
+
+        guard !raw.rawData.isEmpty else {
+            return SwiftRestResponse(
+                statusCode: raw.statusCode,
+                data: nil,
+                rawData: raw.rawData,
+                headers: raw.headers,
+                responseTime: raw.responseTime,
+                finalURL: raw.finalURL,
+                mimeType: raw.mimeType
+            )
+        }
+
+        let decoded: T
+        do {
+            if T.self == Data.self, let value = raw.rawData as? T {
+                decoded = value
+            } else if T.self == String.self,
+                      let text = raw.text(),
+                      let value = text as? T {
+                decoded = value
+            } else {
+                decoded = try Json.parse(data: raw.rawData)
+            }
+        } catch {
+            throw SwiftRestClientError.decodingError(underlying: ErrorContext(error))
+        }
+
+        return SwiftRestResponse(
+            statusCode: raw.statusCode,
+            data: decoded,
+            rawData: raw.rawData,
+            headers: raw.headers,
+            responseTime: raw.responseTime,
+            finalURL: raw.finalURL,
+            mimeType: raw.mimeType
+        )
     }
-    
-    // MARK: - Private Helpers
-    
-    /// Builds the full request URL by appending path and encoding query parameters.
-    ///
-    /// - Parameters:
-    ///   - httpRequest: The request definition containing `path` and `parameters`.
-    ///   - baseURL: The validated base URL.
-    /// - Returns: A `URL` with path and query items.
-    /// - Throws:
-    ///   - `SwiftRestClientError.invalidURLComponents` if URLComponents cannot be created.
-    ///   - `SwiftRestClientError.invalidFinalURL` if the resulting URL is invalid.
-    private func buildRequestURL(
-        for httpRequest: SwiftRestRequest,
-        baseURL: URL
-    ) throws -> URL {
-        var requestURL = baseURL.appendingPathComponent(httpRequest.path)
-        
-        guard
-            let parameters = httpRequest.parameters,
-            !parameters.isEmpty
-        else {
+
+    /// Executes a request where response payload is not required.
+    public func executeAsyncWithoutResponse(_ request: SwiftRestRequest) async throws {
+        _ = try await executeRaw(request)
+    }
+
+    /// Executes a request and returns a decoded value directly.
+    @discardableResult
+    public func execute<T: Decodable & Sendable>(
+        _ request: SwiftRestRequest,
+        as type: T.Type = T.self
+    ) async throws -> T {
+        let response: SwiftRestResponse<T> = try await executeAsyncWithResponse(request)
+
+        if let value = response.data {
+            return value
+        }
+
+        if T.self == NoContent.self, let noContent = NoContent() as? T {
+            return noContent
+        }
+
+        throw SwiftRestClientError.emptyResponseBody(expectedType: String(describing: type))
+    }
+
+    // MARK: - Beginner-friendly HTTP verbs
+
+    public func getRaw(
+        _ path: String,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil,
+        allowHTTPError: Bool = false
+    ) async throws -> SwiftRestRawResponse {
+        let request = makeRequest(
+            path: path,
+            method: .get,
+            parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await executeRaw(request, allowHTTPError: allowHTTPError)
+    }
+
+    @discardableResult
+    public func get<T: Decodable & Sendable>(
+        _ path: String,
+        as type: T.Type = T.self,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async throws -> T {
+        let request = makeRequest(
+            path: path,
+            method: .get,
+            parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await execute(request, as: type)
+    }
+
+    public func deleteRaw(
+        _ path: String,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil,
+        allowHTTPError: Bool = false
+    ) async throws -> SwiftRestRawResponse {
+        let request = makeRequest(
+            path: path,
+            method: .delete,
+            parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await executeRaw(request, allowHTTPError: allowHTTPError)
+    }
+
+    @discardableResult
+    public func delete<T: Decodable & Sendable>(
+        _ path: String,
+        as type: T.Type = T.self,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async throws -> T {
+        let request = makeRequest(
+            path: path,
+            method: .delete,
+            parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await execute(request, as: type)
+    }
+
+    public func postRaw<Body: Encodable & Sendable>(
+        _ path: String,
+        body: Body,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil,
+        allowHTTPError: Bool = false
+    ) async throws -> SwiftRestRawResponse {
+        let request = try makeRequest(
+            path: path,
+            method: .post,
+            body: body,
+            parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await executeRaw(request, allowHTTPError: allowHTTPError)
+    }
+
+    @discardableResult
+    public func post<Body: Encodable & Sendable, Response: Decodable & Sendable>(
+        _ path: String,
+        body: Body,
+        as type: Response.Type = Response.self,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async throws -> Response {
+        let request = try makeRequest(
+            path: path,
+            method: .post,
+            body: body,
+            parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await execute(request, as: type)
+    }
+
+    public func putRaw<Body: Encodable & Sendable>(
+        _ path: String,
+        body: Body,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil,
+        allowHTTPError: Bool = false
+    ) async throws -> SwiftRestRawResponse {
+        let request = try makeRequest(
+            path: path,
+            method: .put,
+            body: body,
+            parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await executeRaw(request, allowHTTPError: allowHTTPError)
+    }
+
+    @discardableResult
+    public func put<Body: Encodable & Sendable, Response: Decodable & Sendable>(
+        _ path: String,
+        body: Body,
+        as type: Response.Type = Response.self,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async throws -> Response {
+        let request = try makeRequest(
+            path: path,
+            method: .put,
+            body: body,
+            parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await execute(request, as: type)
+    }
+
+    public func patchRaw<Body: Encodable & Sendable>(
+        _ path: String,
+        body: Body,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil,
+        allowHTTPError: Bool = false
+    ) async throws -> SwiftRestRawResponse {
+        let request = try makeRequest(
+            path: path,
+            method: .patch,
+            body: body,
+            parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await executeRaw(request, allowHTTPError: allowHTTPError)
+    }
+
+    @discardableResult
+    public func patch<Body: Encodable & Sendable, Response: Decodable & Sendable>(
+        _ path: String,
+        body: Body,
+        as type: Response.Type = Response.self,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async throws -> Response {
+        let request = try makeRequest(
+            path: path,
+            method: .patch,
+            body: body,
+            parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await execute(request, as: type)
+    }
+
+    // MARK: - Request Builders
+
+    private func makeRequest(
+        path: String,
+        method: HTTPMethod,
+        parameters: [String: String],
+        headers: [String: String],
+        authToken: String?,
+        retryPolicy: RetryPolicy?
+    ) -> SwiftRestRequest {
+        var request = SwiftRestRequest(path: path, method: method)
+        request.addParameters(parameters)
+        request.addHeaders(headers)
+
+        if let authToken {
+            request.addAuthToken(authToken)
+        }
+
+        if let retryPolicy {
+            request.configureRetryPolicy(retryPolicy)
+        }
+
+        return request
+    }
+
+    private func makeRequest<Body: Encodable & Sendable>(
+        path: String,
+        method: HTTPMethod,
+        body: Body,
+        parameters: [String: String],
+        headers: [String: String],
+        authToken: String?,
+        retryPolicy: RetryPolicy?
+    ) throws -> SwiftRestRequest {
+        var request = makeRequest(
+            path: path,
+            method: method,
+            parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: retryPolicy
+        )
+
+        try request.addJsonBody(body)
+        return request
+    }
+
+    // MARK: - Internal Helpers
+
+    private func effectiveRetryPolicy(for request: SwiftRestRequest) -> RetryPolicy {
+        request.retryPolicy ?? config.retryPolicy
+    }
+
+    private func buildRequestURL(for request: SwiftRestRequest) throws -> URL {
+        let requestURL = baseURL.appendingPathComponent(request.path)
+
+        guard !request.parameters.isEmpty else {
             return requestURL
         }
-        
-        guard var components = URLComponents(
-            url: requestURL,
-            resolvingAgainstBaseURL: false
-        ) else {
+
+        guard var components = URLComponents(url: requestURL, resolvingAgainstBaseURL: false) else {
             throw SwiftRestClientError.invalidURLComponents
         }
-        components.queryItems = parameters.map {
+
+        components.queryItems = request.parameters.map {
             URLQueryItem(name: $0.key, value: $0.value)
         }
+
         guard let finalURL = components.url else {
             throw SwiftRestClientError.invalidFinalURL
         }
+
         return finalURL
     }
-    
-    /// Constructs a URLRequest by configuring HTTP method, headers, auth, and JSON body.
-    ///
-    /// - Parameters:
-    ///   - httpRequest: The request definition containing method, headers, authToken, and body.
-    ///   - requestURL: The fully built URL for the request.
-    /// - Returns: A configured `URLRequest`.
+
     private func buildURLRequest(
-        for httpRequest: SwiftRestRequest,
+        for request: SwiftRestRequest,
         requestURL: URL
     ) -> URLRequest {
-        var request = URLRequest(url: requestURL)
-        request.httpMethod = httpRequest.method.rawValue
-                
-        // Add any custom headers
-        if let headers = httpRequest.headers {
-            for (key, value) in headers {
-                request.addValue(value, forHTTPHeaderField: key)
-            }
+        var urlRequest = URLRequest(url: requestURL)
+        urlRequest.httpMethod = request.method.rawValue
+        urlRequest.timeoutInterval = config.timeout
+
+        var mergedHeaders = config.baseHeaders
+        for (key, value) in request.headers.dictionary {
+            mergedHeaders.set(value, for: key)
         }
-        
-        // Append Bearer token if provided
-        if let token = httpRequest.authToken {
-            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        if let token = request.authToken {
+            mergedHeaders.set("Bearer \(token)", for: "Authorization")
         }
-        
-        // Attach JSON payload for POST/PUT
-        if (httpRequest.method == .post || httpRequest.method == .put),
-           let jsonBody = httpRequest.jsonBody {
-            request.httpBody = jsonBody.data(using: .utf8)
-            // Ensure Content-Type header is set
-            if httpRequest.headers?[
-                "Content-Type"
-            ] == nil {
-                request.addValue(
-                    "application/json",
-                    forHTTPHeaderField: "Content-Type"
-                )
-            }
+
+        for (key, value) in mergedHeaders.dictionary {
+            urlRequest.setValue(value, forHTTPHeaderField: key)
         }
-        return request
+
+        if let body = request.body {
+            urlRequest.httpBody = body
+        }
+
+        return urlRequest
     }
-    
-    /// Processes the HTTPURLResponse and data, decoding JSON for 2xx status codes.
-    ///
-    /// - Parameters:
-    ///   - data: Raw response data.
-    ///   - urlResponse: The URLResponse returned by URLSession.
-    ///   - startTime: Timestamp when the request started (for timing).
-    ///   - type: The `Decodable` type to decode the JSON into.
-    /// - Returns: A `SwiftRestResponse<T>` on success.
-    /// - Throws:
-    ///   - `SwiftRestClientError.httpError` with full details for non-2xx status codes.
-    ///   - Any underlying JSON or network errors.
-    private func processResponse<T: Decodable>(
+
+    private func processRawResponse(
         _ data: Data,
         _ urlResponse: URLResponse,
-        _ startTime: Date,
-        type: T.Type
-    ) throws -> SwiftRestResponse<T> {
+        _ startTime: Date
+    ) throws -> SwiftRestRawResponse {
         let responseTime = Date().timeIntervalSince(startTime)
+
         guard let httpResponse = urlResponse as? HTTPURLResponse else {
-            let err = ErrorResponse(
+            let errorResponse = ErrorResponse(
                 statusCode: 0,
                 message: "Invalid HTTP response",
-                url: nil, headers: nil,
+                url: nil,
+                headers: HTTPHeaders(),
                 rawPayload: nil,
                 responseTime: responseTime
             )
-            throw SwiftRestClientError.httpError(err)
+            throw SwiftRestClientError.httpError(errorResponse)
         }
 
-        let statusCode    = httpResponse.statusCode
-        let headers       = httpResponse.allHeaderFields as? [String: String]
-        let finalURL      = httpResponse.url
-        let rawString     = String(data: data, encoding: .utf8)
+        let headers = HTTPHeaders(httpResponseHeaders: httpResponse.allHeaderFields)
 
-        // If it's a success code, decode into T
-        if (200...299).contains(statusCode) {
-            var response = SwiftRestResponse<T>(
-                statusCode:   statusCode,
-                headers:      headers,
-                responseTime: responseTime,
-                finalURL:     finalURL,
-                mimeType:     httpResponse.mimeType
-            )
-
-            if let body = rawString,
-               let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type"),
-               contentType.contains("application/json"),
-               !body.isEmpty
-            {
-                let parsed = try Json.parse(data: body) as T
-                response = SwiftRestResponse(
-                    statusCode:   statusCode,
-                    data:         parsed,
-                    rawValue:     body,
-                    headers:      headers,
-                    responseTime: responseTime,
-                    finalURL:     finalURL,
-                    mimeType:     httpResponse.mimeType
-                )
-            }
-
-            return response
-        }
-
-        // Otherwise, throw httpError immediately, carrying the raw body
-        let errorResp = ErrorResponse(
-            statusCode:   statusCode,
-            message:      rawString,
-            url:          finalURL,
-            headers:      headers,
-            rawPayload:   rawString,
-            responseTime: responseTime
+        return SwiftRestResponse(
+            statusCode: httpResponse.statusCode,
+            data: nil,
+            rawData: data,
+            headers: headers,
+            responseTime: responseTime,
+            finalURL: httpResponse.url,
+            mimeType: httpResponse.mimeType
         )
-        throw SwiftRestClientError.httpError(errorResp)
+    }
+
+    private func makeErrorResponse(from response: SwiftRestRawResponse) -> ErrorResponse {
+        ErrorResponse(
+            statusCode: response.statusCode,
+            message: response.rawValue,
+            url: response.finalURL,
+            headers: response.headers,
+            rawPayload: response.rawValue,
+            responseTime: response.responseTime
+        )
+    }
+
+    private func normalize(_ error: Error) -> SwiftRestClientError {
+        if let swiftRestError = error as? SwiftRestClientError {
+            return swiftRestError
+        }
+
+        if error is DecodingError {
+            return .decodingError(underlying: ErrorContext(error))
+        }
+
+        if error is URLError {
+            return .networkError(underlying: ErrorContext(error))
+        }
+
+        return .networkError(underlying: ErrorContext(error))
+    }
+
+    private func shouldRetry(_ error: SwiftRestClientError, policy: RetryPolicy) -> Bool {
+        switch error {
+        case .networkError:
+            return policy.retryOnNetworkErrors
+        case .httpError(let response):
+            return policy.retryableStatusCodes.contains(response.statusCode)
+        default:
+            return false
+        }
+    }
+
+    private func retryDelay(
+        for attempt: Int,
+        policy: RetryPolicy,
+        error: SwiftRestClientError
+    ) -> TimeInterval {
+        if case .httpError(let response) = error,
+           let retryAfter = response.headers["retry-after"],
+           let value = TimeInterval(retryAfter),
+           value >= 0 {
+            return value
+        }
+
+        let exponent = Double(max(0, attempt - 1))
+        let computed = policy.baseDelay * pow(policy.backoffMultiplier, exponent)
+        return min(computed, policy.maxDelay)
     }
 }

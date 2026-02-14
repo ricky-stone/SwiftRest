@@ -1,27 +1,27 @@
-//
-//  Swift Rest
-//  Created by Ricky Stone on 22/03/2025.
-//
-
 import Foundation
 
+/// A sendable wrapper for underlying error descriptions.
+public struct ErrorContext: Error, Sendable {
+    public let description: String
+
+    public init(_ error: any Error) {
+        self.description = error.localizedDescription
+    }
+
+    public init(description: String) {
+        self.description = description
+    }
+}
+
 /// Errors that can occur when using the Swift REST client.
-///
-/// Conforms to `Error` and `Sendable` for safe propagation in concurrent contexts.
 public enum SwiftRestClientError: Error, Sendable {
-    /// The provided base URL string was invalid.
     case invalidBaseURL(String)
-    /// Failed to construct URL components (path or query).
     case invalidURLComponents
-    /// The final URL after appending path or query items was invalid.
     case invalidFinalURL
-    /// A network-level error occurred (e.g., timeout, unreachable host).
-    case networkError(underlying: Error)
-    /// A decoding error occurred while parsing the JSON response.
-    case decodingError(underlying: Error)
-    /// The HTTP response returned a non-2xx status code.
+    case networkError(underlying: ErrorContext)
+    case decodingError(underlying: ErrorContext)
     case httpError(ErrorResponse)
-    /// Exceeded the maximum number of retry attempts.
+    case emptyResponseBody(expectedType: String)
     case retryLimitReached
 }
 
@@ -29,75 +29,29 @@ extension SwiftRestClientError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .invalidBaseURL(let url):
-            return NSLocalizedString(
-                "The base URL provided (\(url)) is invalid. Please check the URL format.",
-                comment: "Invalid Base URL"
-            )
+            return "The base URL (\(url)) is invalid."
         case .invalidURLComponents:
-            return NSLocalizedString(
-                "Unable to construct URL components.",
-                comment: "Invalid URL Components"
-            )
+            return "Unable to construct URL components."
         case .invalidFinalURL:
-            return NSLocalizedString(
-                "The final URL is invalid after appending path components or query items.",
-                comment: "Invalid Final URL"
-            )
-        case .networkError(let error):
-            return String(format:
-                NSLocalizedString(
-                    "A network error occurred: %@",
-                    comment: "Network Error"
-                ),
-                error.localizedDescription
-            )
-        case .decodingError(let error):
-            return String(format:
-                NSLocalizedString(
-                    "Failed to decode response: %@",
-                    comment: "Decoding Error"
-                ),
-                error.localizedDescription
-            )
+            return "The final URL is invalid after appending path components or query items."
+        case .networkError(let context):
+            return "A network error occurred: \(context.description)"
+        case .decodingError(let context):
+            return "Failed to decode response: \(context.description)"
         case .httpError(let response):
             let body = (response.rawPayload ?? response.message) ?? ""
-            let reason = HTTPURLResponse
-                .localizedString(forStatusCode: response.statusCode)
-                .capitalized
-            if body.isEmpty {
-                return String(format:
-                    NSLocalizedString(
-                        "HTTP %d: %@",
-                        comment: "HTTP Error"
-                    ),
-                    response.statusCode,
-                    reason
-                )
-            } else {
-                return String(format:
-                    NSLocalizedString(
-                        "HTTP %d: %@ - %@",
-                        comment: "HTTP Error"
-                    ),
-                    response.statusCode,
-                    reason,
-                    body
-                )
-            }
+            let reason = HTTPURLResponse.localizedString(forStatusCode: response.statusCode).capitalized
+            return body.isEmpty ? "HTTP \(response.statusCode): \(reason)" : "HTTP \(response.statusCode): \(reason) - \(body)"
+        case .emptyResponseBody(let expectedType):
+            return "Response body was empty but \(expectedType) was expected."
         case .retryLimitReached:
-            return NSLocalizedString(
-                "The maximum number of retry attempts has been reached. Please try again later.",
-                comment: "Retry Limit Reached"
-            )
+            return "The maximum number of retry attempts has been reached."
         }
     }
 }
 
-/// Provides a plain-text, user-friendly summary of the error.
-///
-/// Extracts JSON `reason` or `title` fields for HTTP errors when available,
-/// otherwise falls back to the standard HTTP reason phrase.
 public extension SwiftRestClientError {
+    /// A plain-text, user-friendly summary.
     var userMessage: String {
         switch self {
         case .invalidBaseURL(let url):
@@ -106,10 +60,10 @@ public extension SwiftRestClientError {
             return "Unable to construct URL."
         case .invalidFinalURL:
             return "Invalid final URL after appending path or query."
-        case .networkError(let error):
-            return "Network error: \(error.localizedDescription)"
-        case .decodingError(let error):
-            return "Response decoding error: \(error.localizedDescription)"
+        case .networkError(let context):
+            return "Network error: \(context.description)"
+        case .decodingError(let context):
+            return "Response decoding error: \(context.description)"
         case .httpError(let response):
             let code = response.statusCode
             if let raw = response.rawPayload ?? response.message,
@@ -121,11 +75,14 @@ public extension SwiftRestClientError {
                 if let title = json["title"] as? String {
                     return "\(code): \(title)"
                 }
+                if let error = json["error"] as? String {
+                    return "\(code): \(error)"
+                }
             }
-            let phrase = HTTPURLResponse
-                .localizedString(forStatusCode: code)
-                .capitalized
+            let phrase = HTTPURLResponse.localizedString(forStatusCode: code).capitalized
             return "\(code): \(phrase)"
+        case .emptyResponseBody(let expectedType):
+            return "Response was empty. Expected: \(expectedType)."
         case .retryLimitReached:
             return "Too many attempts. Please try again later."
         }
