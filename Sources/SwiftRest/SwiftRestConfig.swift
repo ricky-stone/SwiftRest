@@ -54,14 +54,19 @@ public struct SwiftRestConfig: Sendable {
     /// Default retry policy when a request does not override retries.
     public var retryPolicy: RetryPolicy
 
+    /// Default JSON encoding/decoding behavior.
+    public var jsonCoding: SwiftRestJSONCoding
+
     public init(
         baseHeaders: HTTPHeaders = HTTPHeaders(),
         timeout: TimeInterval = 30,
-        retryPolicy: RetryPolicy = .none
+        retryPolicy: RetryPolicy = .none,
+        jsonCoding: SwiftRestJSONCoding = .foundationDefault
     ) {
         self.baseHeaders = baseHeaders
         self.timeout = max(0.1, timeout)
         self.retryPolicy = retryPolicy
+        self.jsonCoding = jsonCoding
     }
 
     /// Recommended default profile for most apps.
@@ -73,11 +78,58 @@ public struct SwiftRestConfig: Sendable {
     public static let standard = SwiftRestConfig(
         baseHeaders: ["accept": "application/json"],
         timeout: 30,
-        retryPolicy: .standard
+        retryPolicy: .standard,
+        jsonCoding: .foundationDefault
     )
+
+    /// Convenient preset for APIs that use snake_case keys and ISO8601 dates.
+    public static let webAPI = SwiftRestConfig(
+        baseHeaders: ["accept": "application/json"],
+        timeout: 30,
+        retryPolicy: .standard,
+        jsonCoding: .webAPI
+    )
+
+    public func jsonCoding(_ coding: SwiftRestJSONCoding) -> Self {
+        var copy = self
+        copy.jsonCoding = coding
+        return copy
+    }
+
+    public func dateDecodingStrategy(
+        _ strategy: SwiftRestJSONCoding.DateDecodingStrategy
+    ) -> Self {
+        var copy = self
+        copy.jsonCoding = copy.jsonCoding.dateDecodingStrategy(strategy)
+        return copy
+    }
+
+    public func dateEncodingStrategy(
+        _ strategy: SwiftRestJSONCoding.DateEncodingStrategy
+    ) -> Self {
+        var copy = self
+        copy.jsonCoding = copy.jsonCoding.dateEncodingStrategy(strategy)
+        return copy
+    }
+
+    public func keyDecodingStrategy(
+        _ strategy: SwiftRestJSONCoding.KeyDecodingStrategy
+    ) -> Self {
+        var copy = self
+        copy.jsonCoding = copy.jsonCoding.keyDecodingStrategy(strategy)
+        return copy
+    }
+
+    public func keyEncodingStrategy(
+        _ strategy: SwiftRestJSONCoding.KeyEncodingStrategy
+    ) -> Self {
+        var copy = self
+        copy.jsonCoding = copy.jsonCoding.keyEncodingStrategy(strategy)
+        return copy
+    }
 }
 
 /// Source-level version marker for this release line.
 public enum SwiftRestVersion {
-    public static let current = "3.0.2"
+    public static let current = "3.1.0"
 }

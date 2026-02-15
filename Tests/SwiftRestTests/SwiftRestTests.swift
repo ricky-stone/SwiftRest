@@ -7,6 +7,25 @@ struct Dummy: Codable, Equatable, Sendable {
     let name: String
 }
 
+struct ConfigFeatureFlags: Codable, Equatable, Sendable {
+    let vision: Bool
+    let matches: Bool
+}
+
+struct CamelConfigResponse: Codable, Equatable, Sendable {
+    let maintenanceMode: Bool
+    let maintenanceMessage: String
+    let featureFlags: ConfigFeatureFlags
+    let parameters: [String: String]
+    let updatedUtc: Date
+}
+
+struct SnakeConfigResponse: Codable, Equatable, Sendable {
+    let maintenanceMode: Bool
+    let maintenanceMessage: String
+    let updatedUtc: Date
+}
+
 @Test func testJsonHelperEncodingDecoding() throws {
     let dummy = Dummy(id: 1, name: "Alice")
 
@@ -116,13 +135,74 @@ struct Dummy: Codable, Equatable, Sendable {
     }
 }
 
+@Test func testJSONCodingIso8601ForCamelCasePayload() async throws {
+    let payload = #"""
+    {
+        "maintenanceMode": false,
+        "maintenanceMessage": "",
+        "featureFlags": {
+            "vision": true,
+            "matches": true
+        },
+        "parameters": {},
+        "updatedUtc": "2026-02-14T22:46:14.289Z"
+    }
+    """#.data(using: .utf8)!
+
+    let client = MockRestClient { _ in
+        SwiftRestRawResponse(
+            statusCode: 200,
+            data: nil,
+            rawData: payload,
+            headers: ["Content-Type": "application/json"]
+        )
+    }
+
+    var request = SwiftRestRequest(path: "config", method: .get)
+    request.configureDateDecodingStrategy(.iso8601)
+
+    let response: SwiftRestResponse<CamelConfigResponse> =
+        try await client.executeAsyncWithResponse(request)
+    #expect(response.data?.maintenanceMode == false)
+    #expect(response.data?.featureFlags.vision == true)
+}
+
+@Test func testJSONCodingWebAPISnakeCasePreset() throws {
+    let payload = #"""
+    {
+        "maintenance_mode": true,
+        "maintenance_message": "Read-only",
+        "updated_utc": "2026-02-14T22:46:14.289Z"
+    }
+    """#.data(using: .utf8)!
+
+    let response = SwiftRestRawResponse(
+        statusCode: 200,
+        data: nil,
+        rawData: payload,
+        headers: ["Content-Type": "application/json"]
+    )
+
+    let decoded: SnakeConfigResponse = try response.decodeBody(
+        SnakeConfigResponse.self,
+        using: SwiftRestJSONCoding.webAPI.makeDecoder()
+    )
+    #expect(decoded.maintenanceMode == true)
+    #expect(decoded.maintenanceMessage == "Read-only")
+}
+
 @Test func testStandardConfigDefaultsAndVersionMarker() throws {
     #expect(SwiftRestConfig.standard.baseHeaders["accept"] == "application/json")
     #expect(SwiftRestConfig.standard.timeout == 30)
     #expect(SwiftRestConfig.standard.retryPolicy.maxAttempts == 3)
     #expect(SwiftRestConfig.standard.retryPolicy.baseDelay == 0.5)
     #expect(RetryPolicy.standard.retryableStatusCodes.contains(429))
-    #expect(SwiftRestVersion.current == "3.0.2")
+    #expect(SwiftRestConfig.standard.jsonCoding == .foundationDefault)
+    #expect(
+        SwiftRestConfig.standard.dateDecodingStrategy(.iso8601).jsonCoding.dateDecodingStrategy
+            == .iso8601
+    )
+    #expect(SwiftRestVersion.current == "3.1.0")
 
     _ = try SwiftRestClient("https://api.example.com")
 }

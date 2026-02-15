@@ -66,6 +66,14 @@ public struct SwiftRestResponse<T: Decodable & Sendable>: Sendable {
         }
     }
 
+    /// Decodes the body using a SwiftRest JSON coding preset/options.
+    public func decodeBody<U: Decodable & Sendable>(
+        _ type: U.Type = U.self,
+        using coding: SwiftRestJSONCoding
+    ) throws -> U {
+        try decodeBody(type, using: coding.makeDecoder())
+    }
+
     /// Parses the body as a JSON object (`Dictionary`, `Array`, etc.).
     public func jsonObject() throws -> Any {
         guard !rawData.isEmpty else {

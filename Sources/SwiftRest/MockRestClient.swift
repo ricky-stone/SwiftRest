@@ -42,7 +42,8 @@ public struct MockRestClient: RestClientType {
 
         let decoded: T
         do {
-            decoded = try Json.parse(data: raw.rawData)
+            let decoder = (request.jsonCoding ?? .foundationDefault).makeDecoder()
+            decoded = try Json.parse(data: raw.rawData, using: decoder)
         } catch {
             throw SwiftRestClientError.decodingError(underlying: ErrorContext(error))
         }

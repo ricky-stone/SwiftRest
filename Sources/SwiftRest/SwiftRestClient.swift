@@ -85,6 +85,7 @@ public actor SwiftRestClient: RestClientType {
         _ request: SwiftRestRequest
     ) async throws -> SwiftRestResponse<T> {
         let raw = try await executeRaw(request)
+        let decoder = effectiveJSONCoding(for: request).makeDecoder()
 
         guard !raw.rawData.isEmpty else {
             return SwiftRestResponse(
@@ -107,7 +108,7 @@ public actor SwiftRestClient: RestClientType {
                       let value = text as? T {
                 decoded = value
             } else {
-                decoded = try Json.parse(data: raw.rawData)
+                decoded = try Json.parse(data: raw.rawData, using: decoder)
             }
         } catch {
             throw SwiftRestClientError.decodingError(underlying: ErrorContext(error))
@@ -496,7 +497,7 @@ public actor SwiftRestClient: RestClientType {
             retryPolicy: retryPolicy
         )
 
-        try request.addJsonBody(body)
+        try request.addJsonBody(body, using: config.jsonCoding.makeEncoder())
         return request
     }
 
@@ -504,6 +505,10 @@ public actor SwiftRestClient: RestClientType {
 
     private func effectiveRetryPolicy(for request: SwiftRestRequest) -> RetryPolicy {
         request.retryPolicy ?? config.retryPolicy
+    }
+
+    private func effectiveJSONCoding(for request: SwiftRestRequest) -> SwiftRestJSONCoding {
+        request.jsonCoding ?? config.jsonCoding
     }
 
     private func buildRequestURL(for request: SwiftRestRequest) throws -> URL {

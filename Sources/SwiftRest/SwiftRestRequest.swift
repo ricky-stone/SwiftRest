@@ -9,6 +9,7 @@ public struct SwiftRestRequest: Sendable {
     public private(set) var body: Data?
     public private(set) var authToken: String?
     public private(set) var retryPolicy: RetryPolicy?
+    public private(set) var jsonCoding: SwiftRestJSONCoding?
 
     public init(path: String, method: HTTPMethod = .get) {
         self.path = path
@@ -18,6 +19,7 @@ public struct SwiftRestRequest: Sendable {
         self.body = nil
         self.authToken = nil
         self.retryPolicy = nil
+        self.jsonCoding = nil
     }
 
     // MARK: - Mutating API
@@ -50,6 +52,13 @@ public struct SwiftRestRequest: Sendable {
         if headers["content-type"] == nil {
             headers.set("application/json", for: "Content-Type")
         }
+    }
+
+    public mutating func addJsonBody<T: Encodable & Sendable>(
+        _ object: T,
+        using coding: SwiftRestJSONCoding
+    ) throws {
+        try addJsonBody(object, using: coding.makeEncoder())
     }
 
     public mutating func addRawBody(_ data: Data, contentType: String? = nil) {
@@ -89,6 +98,28 @@ public struct SwiftRestRequest: Sendable {
         self.retryPolicy = policy
     }
 
+    public mutating func configureJSONCoding(_ coding: SwiftRestJSONCoding) {
+        self.jsonCoding = coding
+    }
+
+    public mutating func configureDateDecodingStrategy(
+        _ strategy: SwiftRestJSONCoding.DateDecodingStrategy
+    ) {
+        if jsonCoding == nil {
+            jsonCoding = .foundationDefault
+        }
+        jsonCoding = jsonCoding?.dateDecodingStrategy(strategy)
+    }
+
+    public mutating func configureKeyDecodingStrategy(
+        _ strategy: SwiftRestJSONCoding.KeyDecodingStrategy
+    ) {
+        if jsonCoding == nil {
+            jsonCoding = .foundationDefault
+        }
+        jsonCoding = jsonCoding?.keyDecodingStrategy(strategy)
+    }
+
     // MARK: - Chainable API
 
     public func header(_ key: String, _ value: String) -> Self {
@@ -124,6 +155,15 @@ public struct SwiftRestRequest: Sendable {
         return copy
     }
 
+    public func jsonBody<T: Encodable & Sendable>(
+        _ object: T,
+        using coding: SwiftRestJSONCoding
+    ) throws -> Self {
+        var copy = self
+        try copy.addJsonBody(object, using: coding)
+        return copy
+    }
+
     public func rawBody(_ data: Data, contentType: String? = nil) -> Self {
         var copy = self
         copy.addRawBody(data, contentType: contentType)
@@ -151,6 +191,28 @@ public struct SwiftRestRequest: Sendable {
     public func retryPolicy(_ policy: RetryPolicy) -> Self {
         var copy = self
         copy.configureRetryPolicy(policy)
+        return copy
+    }
+
+    public func jsonCoding(_ coding: SwiftRestJSONCoding) -> Self {
+        var copy = self
+        copy.configureJSONCoding(coding)
+        return copy
+    }
+
+    public func dateDecodingStrategy(
+        _ strategy: SwiftRestJSONCoding.DateDecodingStrategy
+    ) -> Self {
+        var copy = self
+        copy.configureDateDecodingStrategy(strategy)
+        return copy
+    }
+
+    public func keyDecodingStrategy(
+        _ strategy: SwiftRestJSONCoding.KeyDecodingStrategy
+    ) -> Self {
+        var copy = self
+        copy.configureKeyDecodingStrategy(strategy)
         return copy
     }
 }

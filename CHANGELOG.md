@@ -1,5 +1,30 @@
 # Changelog
 
+## 3.1.0 - 2026-02-15
+
+### Added
+- Configurable JSON coding options via `SwiftRestJSONCoding`:
+  - date decoding/encoding strategies
+  - key decoding/encoding strategies
+  - data decoding/encoding strategies
+  - encoder output formatting
+- Easy presets:
+  - `.foundationDefault`
+  - `.iso8601`
+  - `.webAPI` (snake_case + ISO8601)
+- `SwiftRestConfig` JSON customization helpers:
+  - `.jsonCoding(...)`
+  - `.dateDecodingStrategy(...)`
+  - `.dateEncodingStrategy(...)`
+  - `.keyDecodingStrategy(...)`
+  - `.keyEncodingStrategy(...)`
+- Per-request JSON strategy overrides in `SwiftRestRequest`.
+
+### Changed
+- `SwiftRestClient` now honors JSON strategy from request/config when decoding.
+- Convenience write methods now encode JSON bodies using config JSON coding.
+- README expanded with simple JSON strategy examples.
+
 ## 3.0.2 - 2026-02-14
 
 ### Added

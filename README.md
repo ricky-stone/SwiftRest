@@ -222,6 +222,7 @@ When no config is passed, SwiftRest uses `SwiftRestConfig.standard`:
   - Max attempts: `3`
   - Base delay: `0.5` seconds
   - Retryable status codes: `408, 429, 500, 502, 503, 504`
+- JSON coding: `SwiftRestJSONCoding.foundationDefault` (no date/key assumptions)
 
 Custom config:
 
@@ -238,6 +239,63 @@ let config = SwiftRestConfig(
 )
 
 let client = try SwiftRestClient("https://api.example.com", config: config)
+```
+
+## JSON Strategies (Easy + Customizable)
+
+### 1) One line for ISO8601 dates
+
+```swift
+let client = try SwiftRestClient(
+    "https://api.example.com",
+    config: .standard.dateDecodingStrategy(.iso8601)
+)
+```
+
+Use `.iso8601WithFractionalSeconds` if your API consistently sends fractional timestamps.
+
+### 2) One line for common web APIs (snake_case + ISO8601)
+
+```swift
+let client = try SwiftRestClient("https://api.example.com", config: .webAPI)
+```
+
+### 3) Your API example (camelCase + `updatedUtc` date string)
+
+This payload style does not need snake_case conversion. Just set date decoding:
+
+```swift
+struct AppConfig: Decodable, Sendable {
+    let maintenanceMode: Bool
+    let maintenanceMessage: String
+    let featureFlags: FeatureFlags
+    let parameters: [String: String]
+    let updatedUtc: Date
+}
+
+struct FeatureFlags: Decodable, Sendable {
+    let vision: Bool
+    let matches: Bool
+    let players: Bool
+    let events: Bool
+    let rankings: Bool
+}
+
+let client = try SwiftRestClient(
+    "https://api.example.com",
+    config: .standard.dateDecodingStrategy(.iso8601)
+)
+
+let config: AppConfig = try await client.get("app-config")
+```
+
+### 4) Per-request override (when one endpoint is different)
+
+```swift
+var request = SwiftRestRequest(path: "legacy-endpoint", method: .get)
+request.configureDateDecodingStrategy(.formatted(format: "yyyy-MM-dd HH:mm:ss"))
+
+let legacy: LegacyModel = try await client.execute(request, as: LegacyModel.self)
 ```
 
 ## Error Handling Pattern
@@ -279,4 +337,4 @@ Thanks to everyone who tests, reports issues, and contributes improvements.
 
 ## Version
 
-Current source version marker: `SwiftRestVersion.current == "3.0.2"`
+Current source version marker: `SwiftRestVersion.current == "3.1.0"`
