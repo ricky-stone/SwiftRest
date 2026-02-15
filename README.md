@@ -109,6 +109,72 @@ Use the same pattern for writes when you want decoded data + headers:
 - `patchResponse(...)`
 - `deleteResponse(...)`
 
+## Complete Example: POST with Model + Response + Headers
+
+Here's an end-to-end example showing how to create an `Encodable` model, send it with `postResponse`, and read both the decoded data and response headers:
+
+```swift
+import SwiftRest
+
+// 1) Define your request model (Encodable)
+struct CreatePost: Encodable, Sendable {
+    let title: String
+    let content: String
+    let authorId: Int
+}
+
+// 2) Define your response model (Decodable)
+struct Post: Decodable, Sendable {
+    let id: Int
+    let title: String
+    let content: String
+    let authorId: Int
+    let createdAt: Date
+}
+
+// 3) Make the request and get both data + headers
+let client = try SwiftRestClient("https://api.example.com")
+let newPost = CreatePost(
+    title: "Hello World",
+    content: "This is my first post!",
+    authorId: 42
+)
+
+do {
+    let response: SwiftRestResponse<Post> = try await client.postResponse("posts", body: newPost)
+    
+    // Access the decoded data
+    guard let post = response.data else {
+        print("No post returned")
+        return
+    }
+    
+    // Access response headers
+    print("Created post ID: \(post.id)")
+    print("Location header: \(response.headers["location"] ?? "none")")
+    print("X-Request-Id: \(response.headers["x-request-id"] ?? "none")")
+    print("Rate-Limit-Remaining: \(response.headers["rate-limit-remaining"] ?? "none")")
+    
+    // Access status code
+    print("Response status: \(response.statusCode)")
+    
+} catch let error as SwiftRestClientError {
+    print(error.userMessage)
+} catch {
+    print(error.localizedDescription)
+}
+```
+
+This pattern is useful when:
+- You need the created resource's ID or full data returned from the server
+- You want to read correlation IDs, rate limits, or other headers
+- You're implementing optimistic UI and need immediate feedback
+
+Use the same pattern with:
+- `postResponse(path:body:)`
+- `putResponse(path:body:)`
+- `patchResponse(path:body:)`
+
 ## POST/PUT/PATCH with a Model Body
 
 ```swift
