@@ -153,6 +153,11 @@ print(result.headers["x-request-id"] ?? "missing")
 print(result.headers["x-rate-limit-remaining"] ?? "0")
 ```
 
+Header scope recap:
+
+- `.header(...)` or `.headers(...)` on `SwiftRest.for(...). ... .client` sets default headers for every request.
+- `.header(...)` or `.headers(...)` on `client.path(...). ...` applies only to that one request.
+
 ## Setup Chain Reference
 
 ```swift
@@ -359,6 +364,32 @@ let users: [User] = try await client
     .value()
 ```
 
+### Query without a model
+
+```swift
+let users: [User] = try await client
+    .path("users")
+    .parameters([
+        "page": "1",
+        "search": "ricky",
+        "includeInactive": "false"
+    ])
+    .get()
+    .value()
+```
+
+Single key style:
+
+```swift
+let users: [User] = try await client
+    .path("users")
+    .parameter("page", "1")
+    .parameter("search", "ricky")
+    .parameter("includeInactive", "false")
+    .get()
+    .value()
+```
+
 ### POST model body
 
 ```swift
@@ -370,6 +401,19 @@ let created: User = try await client
     .path("users")
     .post(body: CreateUser(firstName: "Ricky"))
     .value()
+```
+
+### Success-only call (no model needed)
+
+```swift
+let raw = try await client
+    .path("users/1")
+    .delete()
+    .raw()
+
+if raw.isSuccess {
+    print("Delete worked")
+}
 ```
 
 ### Value + headers together
