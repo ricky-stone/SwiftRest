@@ -1,5 +1,28 @@
 # Changelog
 
+## 3.2.0 - 2026-02-18
+
+### Added
+- Global access token support in `SwiftRestConfig` and `SwiftRestClient`:
+  - `SwiftRestConfig.accessToken`
+  - `SwiftRestConfig.accessToken(_:)`
+  - `SwiftRestClient.setAccessToken(_:)`
+  - `SwiftRestClient.clearAccessToken()`
+- Async token provider support for rotating/refreshing credentials:
+  - `SwiftRestAccessTokenProvider`
+  - `SwiftRestConfig.accessTokenProvider`
+  - `SwiftRestConfig.accessTokenProvider(_:)`
+  - `SwiftRestClient.setAccessTokenProvider(_:)`
+  - `SwiftRestClient.clearAccessTokenProvider()`
+- Auth resolution precedence:
+  - per-request token
+  - token provider
+  - global token
+- Tests that validate outgoing `Authorization` header behavior and precedence.
+
+### Changed
+- README now includes beginner-friendly authentication examples for global, per-request, and provider-based token flows.
+
 ## 3.1.0 - 2026-02-15
 
 ### Added

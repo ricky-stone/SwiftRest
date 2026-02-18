@@ -26,6 +26,47 @@ struct SnakeConfigResponse: Codable, Equatable, Sendable {
     let updatedUtc: Date
 }
 
+private final class EchoAuthURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+
+        let observedAuthorization = request.value(forHTTPHeaderField: "Authorization") ?? "none"
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: [
+                "Content-Type": "application/json",
+                "X-Observed-Authorization": observedAuthorization
+            ]
+        )!
+
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data())
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+private func makeAuthEchoClient(config: SwiftRestConfig = .standard) throws -> SwiftRestClient {
+    let sessionConfiguration = URLSessionConfiguration.ephemeral
+    sessionConfiguration.protocolClasses = [EchoAuthURLProtocol.self]
+    let session = URLSession(configuration: sessionConfiguration)
+    return try SwiftRestClient("https://api.example.com", config: config, session: session)
+}
+
 @Test func testJsonHelperEncodingDecoding() throws {
     let dummy = Dummy(id: 1, name: "Alice")
 
@@ -191,6 +232,43 @@ struct SnakeConfigResponse: Codable, Equatable, Sendable {
     #expect(decoded.maintenanceMessage == "Read-only")
 }
 
+@Test func testGlobalAccessTokenAndPrecedence() async throws {
+    let client = try makeAuthEchoClient(config: .standard.accessToken("global-token"))
+
+    let globalRaw = try await client.getRaw("users/1")
+    #expect(globalRaw.header("x-observed-authorization") == "Bearer global-token")
+
+    await client.setAccessToken("updated-global")
+    let updatedGlobalRaw = try await client.getRaw("users/1")
+    #expect(updatedGlobalRaw.header("x-observed-authorization") == "Bearer updated-global")
+
+    await client.setAccessTokenProvider { "provider-token" }
+    let providerRaw = try await client.getRaw("users/1")
+    #expect(providerRaw.header("x-observed-authorization") == "Bearer provider-token")
+
+    let requestRaw = try await client.getRaw("users/1", authToken: "request-token")
+    #expect(requestRaw.header("x-observed-authorization") == "Bearer request-token")
+
+    await client.clearAccessTokenProvider()
+    let fallbackRaw = try await client.getRaw("users/1")
+    #expect(fallbackRaw.header("x-observed-authorization") == "Bearer updated-global")
+
+    await client.clearAccessToken()
+    let noneRaw = try await client.getRaw("users/1")
+    #expect(noneRaw.header("x-observed-authorization") == "none")
+}
+
+@Test func testAccessTokenProviderFromConfig() async throws {
+    let client = try makeAuthEchoClient(
+        config: .standard
+            .accessToken("global-token")
+            .accessTokenProvider({ "provider-token" })
+    )
+
+    let raw = try await client.getRaw("users/1")
+    #expect(raw.header("x-observed-authorization") == "Bearer provider-token")
+}
+
 @Test func testStandardConfigDefaultsAndVersionMarker() throws {
     #expect(SwiftRestConfig.standard.baseHeaders["accept"] == "application/json")
     #expect(SwiftRestConfig.standard.timeout == 30)
@@ -202,7 +280,7 @@ struct SnakeConfigResponse: Codable, Equatable, Sendable {
         SwiftRestConfig.standard.dateDecodingStrategy(.iso8601).jsonCoding.dateDecodingStrategy
             == .iso8601
     )
-    #expect(SwiftRestVersion.current == "3.1.0")
+    #expect(SwiftRestVersion.current == "3.2.0")
 
     _ = try SwiftRestClient("https://api.example.com")
 }

@@ -70,6 +70,47 @@ do {
 }
 ```
 
+## Authentication (Global + Per Request)
+
+### 1) Global token once
+
+```swift
+let client = try SwiftRestClient(
+    "https://api.example.com",
+    config: .standard.accessToken("YOUR_ACCESS_TOKEN")
+)
+
+let user: User = try await client.get("users/me")
+```
+
+### 2) Set or clear token at runtime
+
+```swift
+await client.setAccessToken("YOUR_ACCESS_TOKEN")
+await client.clearAccessToken()
+```
+
+### 3) Per-request override
+
+```swift
+let adminView: User = try await client.get("users/1", authToken: "ONE_OFF_TOKEN")
+```
+
+### 4) Rotating token provider
+
+```swift
+await client.setAccessTokenProvider {
+    // Return latest token (refresh if needed)
+    "LATEST_ACCESS_TOKEN"
+}
+```
+
+Auth precedence is:
+
+1. per-request token (`authToken:` or `request.authToken(...)`)
+2. token provider (`setAccessTokenProvider` / `config.accessTokenProvider(...)`)
+3. global token (`setAccessToken` / `config.accessToken(...)`)
+
 ## One Call: Data + Headers
 
 ### Compact
@@ -289,6 +330,7 @@ When no config is passed, SwiftRest uses `SwiftRestConfig.standard`:
   - Base delay: `0.5` seconds
   - Retryable status codes: `408, 429, 500, 502, 503, 504`
 - JSON coding: `SwiftRestJSONCoding.foundationDefault` (no date/key assumptions)
+- Global token: none
 
 Custom config:
 
@@ -403,4 +445,4 @@ Thanks to everyone who tests, reports issues, and contributes improvements.
 
 ## Version
 
-Current source version marker: `SwiftRestVersion.current == "3.1.0"`
+Current source version marker: `SwiftRestVersion.current == "3.2.0"`

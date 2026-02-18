@@ -5,6 +5,8 @@ public actor SwiftRestClient: RestClientType {
     private let baseURL: URL
     private let config: SwiftRestConfig
     private let session: URLSession
+    private var accessToken: String?
+    private var accessTokenProvider: SwiftRestAccessTokenProvider?
 
     public init(
         _ url: String,
@@ -23,6 +25,8 @@ public actor SwiftRestClient: RestClientType {
         self.baseURL = parsed
         self.config = config
         self.session = session
+        self.accessToken = config.accessToken
+        self.accessTokenProvider = config.accessTokenProvider
     }
 
     // MARK: - Low-level API
@@ -42,7 +46,12 @@ public actor SwiftRestClient: RestClientType {
         while attempt <= policy.maxAttempts {
             do {
                 let requestURL = try buildRequestURL(for: request)
-                let urlRequest = buildURLRequest(for: request, requestURL: requestURL)
+                let resolvedAuthToken = try await effectiveAuthToken(for: request)
+                let urlRequest = buildURLRequest(
+                    for: request,
+                    requestURL: requestURL,
+                    resolvedAuthToken: resolvedAuthToken
+                )
 
                 let startTime = Date()
                 let (data, urlResponse) = try await session.data(for: urlRequest)
@@ -147,6 +156,28 @@ public actor SwiftRestClient: RestClientType {
         }
 
         throw SwiftRestClientError.emptyResponseBody(expectedType: String(describing: type))
+    }
+
+    // MARK: - Auth Management
+
+    /// Sets the global access token used when a request does not provide one.
+    public func setAccessToken(_ token: String) {
+        accessToken = normalizedToken(token)
+    }
+
+    /// Clears the global access token.
+    public func clearAccessToken() {
+        accessToken = nil
+    }
+
+    /// Sets an async provider used to resolve an access token per request.
+    public func setAccessTokenProvider(_ provider: @escaping SwiftRestAccessTokenProvider) {
+        accessTokenProvider = provider
+    }
+
+    /// Clears the async access token provider.
+    public func clearAccessTokenProvider() {
+        accessTokenProvider = nil
     }
 
     // MARK: - Beginner-friendly HTTP verbs
@@ -535,7 +566,8 @@ public actor SwiftRestClient: RestClientType {
 
     private func buildURLRequest(
         for request: SwiftRestRequest,
-        requestURL: URL
+        requestURL: URL,
+        resolvedAuthToken: String?
     ) -> URLRequest {
         var urlRequest = URLRequest(url: requestURL)
         urlRequest.httpMethod = request.method.rawValue
@@ -546,7 +578,7 @@ public actor SwiftRestClient: RestClientType {
             mergedHeaders.set(value, for: key)
         }
 
-        if let token = request.authToken {
+        if let token = resolvedAuthToken {
             mergedHeaders.set("Bearer \(token)", for: "Authorization")
         }
 
@@ -618,6 +650,27 @@ public actor SwiftRestClient: RestClientType {
         }
 
         return .networkError(underlying: ErrorContext(error))
+    }
+
+    private func effectiveAuthToken(for request: SwiftRestRequest) async throws -> String? {
+        if let token = normalizedToken(request.authToken) {
+            return token
+        }
+
+        if let provider = accessTokenProvider,
+           let token = normalizedToken(try await provider()) {
+            return token
+        }
+
+        return normalizedToken(accessToken)
+    }
+
+    private func normalizedToken(_ token: String?) -> String? {
+        guard let token else {
+            return nil
+        }
+        let value = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
     }
 
     private func shouldRetry(_ error: SwiftRestClientError, policy: RetryPolicy) -> Bool {

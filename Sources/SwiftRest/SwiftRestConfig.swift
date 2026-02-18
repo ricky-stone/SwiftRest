@@ -1,5 +1,8 @@
 import Foundation
 
+/// Async provider used to resolve an access token at request time.
+public typealias SwiftRestAccessTokenProvider = @Sendable () async throws -> String?
+
 /// Defines retry behavior for transient failures.
 public struct RetryPolicy: Sendable {
     /// Maximum number of total attempts, including the first request.
@@ -57,16 +60,26 @@ public struct SwiftRestConfig: Sendable {
     /// Default JSON encoding/decoding behavior.
     public var jsonCoding: SwiftRestJSONCoding
 
+    /// Optional global bearer token used when a request does not provide one.
+    public var accessToken: String?
+
+    /// Optional provider to resolve bearer token dynamically per request.
+    public var accessTokenProvider: SwiftRestAccessTokenProvider?
+
     public init(
         baseHeaders: HTTPHeaders = HTTPHeaders(),
         timeout: TimeInterval = 30,
         retryPolicy: RetryPolicy = .none,
-        jsonCoding: SwiftRestJSONCoding = .foundationDefault
+        jsonCoding: SwiftRestJSONCoding = .foundationDefault,
+        accessToken: String? = nil,
+        accessTokenProvider: SwiftRestAccessTokenProvider? = nil
     ) {
         self.baseHeaders = baseHeaders
         self.timeout = max(0.1, timeout)
         self.retryPolicy = retryPolicy
         self.jsonCoding = jsonCoding
+        self.accessToken = accessToken
+        self.accessTokenProvider = accessTokenProvider
     }
 
     /// Recommended default profile for most apps.
@@ -127,9 +140,21 @@ public struct SwiftRestConfig: Sendable {
         copy.jsonCoding = copy.jsonCoding.keyEncodingStrategy(strategy)
         return copy
     }
+
+    public func accessToken(_ token: String?) -> Self {
+        var copy = self
+        copy.accessToken = token
+        return copy
+    }
+
+    public func accessTokenProvider(_ provider: SwiftRestAccessTokenProvider?) -> Self {
+        var copy = self
+        copy.accessTokenProvider = provider
+        return copy
+    }
 }
 
 /// Source-level version marker for this release line.
 public enum SwiftRestVersion {
-    public static let current = "3.1.0"
+    public static let current = "3.2.0"
 }
