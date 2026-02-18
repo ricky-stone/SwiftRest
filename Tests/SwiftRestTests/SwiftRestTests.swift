@@ -26,6 +26,11 @@ struct SnakeConfigResponse: Codable, Equatable, Sendable {
     let updatedUtc: Date
 }
 
+private struct APIErrorPayload: Codable, Equatable, Sendable {
+    let message: String
+    let code: String?
+}
+
 private struct UserListQuery: Encodable, Sendable {
     let page: Int
     let search: String
@@ -139,6 +144,103 @@ private final class SimpleSuccessURLProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
+private final class RefreshAuthURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+
+        let authorization = request.value(forHTTPHeaderField: "Authorization") ?? "none"
+        let isFresh = authorization == "Bearer fresh-token"
+        let statusCode = isFresh ? 200 : 401
+        let body = isFresh
+            ? #"{"id":1,"name":"Alice"}"#
+            : #"{"message":"Unauthorized","code":"unauthorized"}"#
+
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: statusCode,
+            httpVersion: nil,
+            headerFields: [
+                "Content-Type": "application/json",
+                "X-Observed-Authorization": authorization
+            ]
+        )!
+
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+private final class ResultScenarioURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+
+        switch url.path {
+        case "/result-success":
+            respond(
+                url: url,
+                statusCode: 200,
+                body: #"{"id":42,"name":"Result User"}"#
+            )
+        case "/result-api-error":
+            respond(
+                url: url,
+                statusCode: 422,
+                body: #"{"message":"Invalid request","code":"validation_failed"}"#
+            )
+        case "/result-api-error-plain":
+            respond(
+                url: url,
+                statusCode: 500,
+                body: "oops"
+            )
+        case "/result-network-failure":
+            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+        default:
+            respond(url: url, statusCode: 404, body: #"{"message":"Not found","code":"missing"}"#)
+        }
+    }
+
+    override func stopLoading() {}
+
+    private func respond(url: URL, statusCode: Int, body: String) {
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: statusCode,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        )!
+
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
 private func makeAuthEchoClient(config: SwiftRestConfig = .standard) throws -> SwiftRestClient {
     let sessionConfiguration = URLSessionConfiguration.ephemeral
     sessionConfiguration.protocolClasses = [EchoAuthURLProtocol.self]
@@ -160,6 +262,20 @@ private func makeSimpleSuccessClient(config: SwiftRestConfig = .standard) throws
     return try SwiftRestClient("https://api.example.com", config: config, session: session)
 }
 
+private func makeRefreshAuthClient(config: SwiftRestConfig = .standard) throws -> SwiftRestClient {
+    let sessionConfiguration = URLSessionConfiguration.ephemeral
+    sessionConfiguration.protocolClasses = [RefreshAuthURLProtocol.self]
+    let session = URLSession(configuration: sessionConfiguration)
+    return try SwiftRestClient("https://api.example.com", config: config, session: session)
+}
+
+private func makeResultScenarioClient(config: SwiftRestConfig = .standard) throws -> SwiftRestClient {
+    let sessionConfiguration = URLSessionConfiguration.ephemeral
+    sessionConfiguration.protocolClasses = [ResultScenarioURLProtocol.self]
+    let session = URLSession(configuration: sessionConfiguration)
+    return try SwiftRestClient("https://api.example.com", config: config, session: session)
+}
+
 private final class LogCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var messages: [String] = []
@@ -174,6 +290,18 @@ private final class LogCollector: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return messages
+    }
+}
+
+private actor AsyncCounter {
+    private var value: Int = 0
+
+    func increment() {
+        value += 1
+    }
+
+    func current() -> Int {
+        value
     }
 }
 
@@ -386,6 +514,168 @@ private final class LogCollector: @unchecked Sendable {
     #expect(raw.header("x-observed-authorization") == "Bearer provider-token")
 }
 
+@Test func testAuthRefreshRetries401OnceAndSucceeds() async throws {
+    let refreshCounter = AsyncCounter()
+    let refresh = SwiftRestAuthRefresh {
+        await refreshCounter.increment()
+        return "fresh-token"
+    }
+
+    let client = try makeRefreshAuthClient(
+        config: .standard
+            .accessToken("expired-token")
+            .authRefresh(refresh)
+    )
+
+    let raw = try await client.getRaw("secure/profile")
+    #expect(raw.statusCode == 200)
+    #expect(raw.header("x-observed-authorization") == "Bearer fresh-token")
+    #expect(await refreshCounter.current() == 1)
+}
+
+@Test func testAuthRefreshCanBeAppliedToPerRequestToken() async throws {
+    let refreshCounter = AsyncCounter()
+    let refresh = SwiftRestAuthRefresh {
+        await refreshCounter.increment()
+        return "fresh-token"
+    }.appliesToPerRequestToken(true)
+
+    let client = try makeRefreshAuthClient(config: .standard.authRefresh(refresh))
+
+    let raw = try await client.getRaw(
+        "secure/profile",
+        authToken: "expired-token"
+    )
+    #expect(raw.statusCode == 200)
+    #expect(raw.header("x-observed-authorization") == "Bearer fresh-token")
+    #expect(await refreshCounter.current() == 1)
+}
+
+@Test func testAuthRefreshSkipsPerRequestTokenByDefault() async throws {
+    let refreshCounter = AsyncCounter()
+    let refresh = SwiftRestAuthRefresh {
+        await refreshCounter.increment()
+        return "fresh-token"
+    }
+
+    let client = try makeRefreshAuthClient(config: .standard.authRefresh(refresh))
+
+    let raw = try await client.getRaw(
+        "secure/profile",
+        authToken: "expired-token",
+        allowHTTPError: true
+    )
+    #expect(raw.statusCode == 401)
+    #expect(await refreshCounter.current() == 0)
+}
+
+@Test func testAuthRefreshSingleFlightAcrossConcurrentRequests() async throws {
+    let refreshCounter = AsyncCounter()
+    let refresh = SwiftRestAuthRefresh {
+        await refreshCounter.increment()
+        try await Task.sleep(nanoseconds: 75_000_000)
+        return "fresh-token"
+    }
+
+    let client = try makeRefreshAuthClient(
+        config: .standard
+            .accessToken("expired-token")
+            .authRefresh(refresh)
+    )
+
+    try await withThrowingTaskGroup(of: Int.self) { group in
+        for _ in 0..<6 {
+            group.addTask {
+                let raw = try await client.getRaw("secure/profile")
+                return raw.statusCode
+            }
+        }
+
+        for try await status in group {
+            #expect(status == 200)
+        }
+    }
+
+    #expect(await refreshCounter.current() == 1)
+}
+
+@Test func testAuthRefreshFailureThrowsSpecificError() async throws {
+    enum RefreshFailure: Error {
+        case failed
+    }
+
+    let refresh = SwiftRestAuthRefresh {
+        throw RefreshFailure.failed
+    }
+
+    let client = try makeRefreshAuthClient(
+        config: .standard
+            .accessToken("expired-token")
+            .authRefresh(refresh)
+    )
+
+    do {
+        _ = try await client.getRaw("secure/profile")
+        #expect(Bool(false))
+    } catch let error as SwiftRestClientError {
+        switch error {
+        case .authRefreshFailed:
+            #expect(Bool(true))
+        default:
+            #expect(Bool(false))
+        }
+    } catch {
+        #expect(Bool(false))
+    }
+}
+
+@Test func testResultAPIForSuccessAndAPIErrorsAndTransportFailures() async throws {
+    let client = try makeResultScenarioClient()
+
+    let success: SwiftRestResult<Dummy, APIErrorPayload> =
+        await client.getResult("result-success")
+    switch success {
+    case .success(let response):
+        #expect(response.statusCode == 200)
+        #expect(response.data == Dummy(id: 42, name: "Result User"))
+    default:
+        #expect(Bool(false))
+    }
+
+    let apiError: SwiftRestResult<Dummy, APIErrorPayload> =
+        await client.getResult("result-api-error")
+    switch apiError {
+    case .apiError(let decoded, let response):
+        #expect(response.statusCode == 422)
+        #expect(decoded == APIErrorPayload(message: "Invalid request", code: "validation_failed"))
+    default:
+        #expect(Bool(false))
+    }
+
+    let undecodable: SwiftRestResult<Dummy, APIErrorPayload> =
+        await client.getResult("result-api-error-plain")
+    switch undecodable {
+    case .apiError(let decoded, let response):
+        #expect(response.statusCode == 500)
+        #expect(decoded == nil)
+    default:
+        #expect(Bool(false))
+    }
+
+    let transport: SwiftRestResult<Dummy, APIErrorPayload> =
+        await client.getResult("result-network-failure")
+    switch transport {
+    case .failure(let error):
+        if case .networkError = error {
+            #expect(Bool(true))
+        } else {
+            #expect(Bool(false))
+        }
+    default:
+        #expect(Bool(false))
+    }
+}
+
 @Test func testQueryModelSupportForGetAndDelete() async throws {
     let client = try makeQueryEchoClient()
     let query = UserListQuery(page: 2, search: "ricky", includeInactive: true)
@@ -460,7 +750,8 @@ private final class LogCollector: @unchecked Sendable {
             == .iso8601
     )
     #expect(SwiftRestConfig.standard.debugLogging.isEnabled == false)
-    #expect(SwiftRestVersion.current == "3.3.0")
+    #expect(SwiftRestConfig.standard.authRefresh.isEnabled == false)
+    #expect(SwiftRestVersion.current == "3.4.0")
 
     _ = try SwiftRestClient("https://api.example.com")
 }

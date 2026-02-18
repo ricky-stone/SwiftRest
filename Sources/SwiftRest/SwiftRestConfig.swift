@@ -69,6 +69,9 @@ public struct SwiftRestConfig: Sendable {
     /// Optional request/response debug logging.
     public var debugLogging: SwiftRestDebugLogging
 
+    /// Optional auth refresh behavior on unauthorized responses.
+    public var authRefresh: SwiftRestAuthRefresh
+
     public init(
         baseHeaders: HTTPHeaders = HTTPHeaders(),
         timeout: TimeInterval = 30,
@@ -76,7 +79,8 @@ public struct SwiftRestConfig: Sendable {
         jsonCoding: SwiftRestJSONCoding = .foundationDefault,
         accessToken: String? = nil,
         accessTokenProvider: SwiftRestAccessTokenProvider? = nil,
-        debugLogging: SwiftRestDebugLogging = .disabled
+        debugLogging: SwiftRestDebugLogging = .disabled,
+        authRefresh: SwiftRestAuthRefresh = .disabled
     ) {
         self.baseHeaders = baseHeaders
         self.timeout = max(0.1, timeout)
@@ -85,6 +89,7 @@ public struct SwiftRestConfig: Sendable {
         self.accessToken = accessToken
         self.accessTokenProvider = accessTokenProvider
         self.debugLogging = debugLogging
+        self.authRefresh = authRefresh
     }
 
     /// Recommended default profile for most apps.
@@ -169,9 +174,15 @@ public struct SwiftRestConfig: Sendable {
         copy.debugLogging = enabled ? .basic : .disabled
         return copy
     }
+
+    public func authRefresh(_ refresh: SwiftRestAuthRefresh) -> Self {
+        var copy = self
+        copy.authRefresh = refresh
+        return copy
+    }
 }
 
 /// Source-level version marker for this release line.
 public enum SwiftRestVersion {
-    public static let current = "3.3.0"
+    public static let current = "3.4.0"
 }

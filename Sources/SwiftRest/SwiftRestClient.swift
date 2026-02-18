@@ -7,6 +7,8 @@ public actor SwiftRestClient: RestClientType {
     private let session: URLSession
     private var accessToken: String?
     private var accessTokenProvider: SwiftRestAccessTokenProvider?
+    private var authRefresh: SwiftRestAuthRefresh
+    private var authRefreshTask: Task<String?, Error>?
 
     public init(
         _ url: String,
@@ -27,6 +29,7 @@ public actor SwiftRestClient: RestClientType {
         self.session = session
         self.accessToken = config.accessToken
         self.accessTokenProvider = config.accessTokenProvider
+        self.authRefresh = config.authRefresh
     }
 
     // MARK: - Low-level API
@@ -42,11 +45,17 @@ public actor SwiftRestClient: RestClientType {
 
         var attempt = 1
         var lastError: SwiftRestClientError?
+        var didAttemptAuthRefresh = false
+        var authOverrideToken: String?
 
         while attempt <= policy.maxAttempts {
             do {
                 let requestURL = try buildRequestURL(for: request)
-                let resolvedAuthToken = try await effectiveAuthToken(for: request)
+                let resolvedAuthToken = if let authOverrideToken {
+                    authOverrideToken
+                } else {
+                    try await effectiveAuthToken(for: request)
+                }
                 let urlRequest = buildURLRequest(
                     for: request,
                     requestURL: requestURL,
@@ -64,6 +73,31 @@ public actor SwiftRestClient: RestClientType {
                     attempt: attempt,
                     maxAttempts: policy.maxAttempts
                 )
+
+                if raw.statusCode == 401,
+                   shouldAttemptAuthRefresh(
+                       for: request,
+                       didAttemptAuthRefresh: didAttemptAuthRefresh
+                   ) {
+                    didAttemptAuthRefresh = true
+                    let refreshedToken = try await refreshAccessToken()
+
+                    if let refreshedToken,
+                       refreshedToken != resolvedAuthToken {
+                        authOverrideToken = refreshedToken
+                        logAuthRefresh("Token refreshed after 401. Retrying request once.")
+                        continue
+                    }
+
+                    if let currentToken = try await effectiveAuthToken(for: request),
+                       currentToken != resolvedAuthToken {
+                        authOverrideToken = currentToken
+                        logAuthRefresh("Auth token changed after refresh. Retrying request once.")
+                        continue
+                    }
+
+                    logAuthRefresh("Auth refresh did not produce a new token.")
+                }
 
                 if !allowHTTPError, !raw.isSuccess {
                     throw SwiftRestClientError.httpError(makeErrorResponse(from: raw))
@@ -102,34 +136,11 @@ public actor SwiftRestClient: RestClientType {
         _ request: SwiftRestRequest
     ) async throws -> SwiftRestResponse<T> {
         let raw = try await executeRaw(request)
-        let decoder = effectiveJSONCoding(for: request).makeDecoder()
-
-        guard !raw.rawData.isEmpty else {
-            return SwiftRestResponse(
-                statusCode: raw.statusCode,
-                data: nil,
-                rawData: raw.rawData,
-                headers: raw.headers,
-                responseTime: raw.responseTime,
-                finalURL: raw.finalURL,
-                mimeType: raw.mimeType
-            )
-        }
-
-        let decoded: T
-        do {
-            if T.self == Data.self, let value = raw.rawData as? T {
-                decoded = value
-            } else if T.self == String.self,
-                      let text = raw.text(),
-                      let value = text as? T {
-                decoded = value
-            } else {
-                decoded = try Json.parse(data: raw.rawData, using: decoder)
-            }
-        } catch {
-            throw SwiftRestClientError.decodingError(underlying: ErrorContext(error))
-        }
+        let decoded: T? = try decodeResponseData(
+            raw,
+            as: T.self,
+            coding: effectiveJSONCoding(for: request)
+        )
 
         return SwiftRestResponse(
             statusCode: raw.statusCode,
@@ -166,6 +177,54 @@ public actor SwiftRestClient: RestClientType {
         throw SwiftRestClientError.emptyResponseBody(expectedType: String(describing: type))
     }
 
+    /// Executes a request and returns result-style success/API-error/failure output.
+    public func executeResult<Success: Decodable & Sendable, APIError: Decodable & Sendable>(
+        _ request: SwiftRestRequest,
+        as successType: Success.Type = Success.self,
+        error apiErrorType: APIError.Type = APIError.self
+    ) async -> SwiftRestResult<Success, APIError> {
+        _ = successType
+        _ = apiErrorType
+
+        let coding = effectiveJSONCoding(for: request)
+
+        do {
+            let raw = try await executeRaw(request, allowHTTPError: true)
+
+            if raw.isSuccess {
+                do {
+                    let decoded: Success? = try decodeResponseData(raw, as: Success.self, coding: coding)
+                    return .success(
+                        SwiftRestResponse(
+                            statusCode: raw.statusCode,
+                            data: decoded,
+                            rawData: raw.rawData,
+                            headers: raw.headers,
+                            responseTime: raw.responseTime,
+                            finalURL: raw.finalURL,
+                            mimeType: raw.mimeType
+                        )
+                    )
+                } catch let error as SwiftRestClientError {
+                    return .failure(error)
+                } catch {
+                    return .failure(normalize(error))
+                }
+            }
+
+            do {
+                let decodedAPIError: APIError? = try decodeResponseData(raw, as: APIError.self, coding: coding)
+                return .apiError(decoded: decodedAPIError, response: raw)
+            } catch {
+                return .apiError(decoded: nil, response: raw)
+            }
+        } catch let error as SwiftRestClientError {
+            return .failure(error)
+        } catch {
+            return .failure(normalize(error))
+        }
+    }
+
     // MARK: - Auth Management
 
     /// Sets the global access token used when a request does not provide one.
@@ -186,6 +245,18 @@ public actor SwiftRestClient: RestClientType {
     /// Clears the async access token provider.
     public func clearAccessTokenProvider() {
         accessTokenProvider = nil
+    }
+
+    /// Sets auth refresh behavior for unauthorized responses.
+    public func setAuthRefresh(_ refresh: SwiftRestAuthRefresh) {
+        authRefresh = refresh
+    }
+
+    /// Disables auth refresh behavior.
+    public func clearAuthRefresh() {
+        authRefresh = .disabled
+        authRefreshTask?.cancel()
+        authRefreshTask = nil
     }
 
     // MARK: - Beginner-friendly HTTP verbs
@@ -607,6 +678,191 @@ public actor SwiftRestClient: RestClientType {
         return try await executeAsyncWithResponse(request)
     }
 
+    // MARK: - Result-style HTTP verbs
+
+    public func getResult<Success: Decodable & Sendable, APIError: Decodable & Sendable>(
+        _ path: String,
+        as type: Success.Type = Success.self,
+        error errorType: APIError.Type = APIError.self,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async -> SwiftRestResult<Success, APIError> {
+        _ = type
+        _ = errorType
+        let request = makeRequest(
+            path: path,
+            method: .get,
+            parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return await executeResult(request, as: Success.self, error: APIError.self)
+    }
+
+    public func getResult<Success: Decodable & Sendable, APIError: Decodable & Sendable, Query: Encodable & Sendable>(
+        _ path: String,
+        as type: Success.Type = Success.self,
+        error errorType: APIError.Type = APIError.self,
+        query: Query,
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async -> SwiftRestResult<Success, APIError> {
+        _ = type
+        _ = errorType
+        do {
+            let request = try makeRequest(
+                path: path,
+                method: .get,
+                query: query,
+                headers: headers,
+                authToken: authToken,
+                retryPolicy: nil
+            )
+            return await executeResult(request, as: Success.self, error: APIError.self)
+        } catch let error as SwiftRestClientError {
+            return .failure(error)
+        } catch {
+            return .failure(normalize(error))
+        }
+    }
+
+    public func deleteResult<Success: Decodable & Sendable, APIError: Decodable & Sendable>(
+        _ path: String,
+        as type: Success.Type = Success.self,
+        error errorType: APIError.Type = APIError.self,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async -> SwiftRestResult<Success, APIError> {
+        _ = type
+        _ = errorType
+        let request = makeRequest(
+            path: path,
+            method: .delete,
+            parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return await executeResult(request, as: Success.self, error: APIError.self)
+    }
+
+    public func deleteResult<Success: Decodable & Sendable, APIError: Decodable & Sendable, Query: Encodable & Sendable>(
+        _ path: String,
+        as type: Success.Type = Success.self,
+        error errorType: APIError.Type = APIError.self,
+        query: Query,
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async -> SwiftRestResult<Success, APIError> {
+        _ = type
+        _ = errorType
+        do {
+            let request = try makeRequest(
+                path: path,
+                method: .delete,
+                query: query,
+                headers: headers,
+                authToken: authToken,
+                retryPolicy: nil
+            )
+            return await executeResult(request, as: Success.self, error: APIError.self)
+        } catch let error as SwiftRestClientError {
+            return .failure(error)
+        } catch {
+            return .failure(normalize(error))
+        }
+    }
+
+    public func postResult<Body: Encodable & Sendable, Success: Decodable & Sendable, APIError: Decodable & Sendable>(
+        _ path: String,
+        body: Body,
+        as type: Success.Type = Success.self,
+        error errorType: APIError.Type = APIError.self,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async -> SwiftRestResult<Success, APIError> {
+        _ = type
+        _ = errorType
+        do {
+            let request = try makeRequest(
+                path: path,
+                method: .post,
+                body: body,
+                parameters: parameters,
+                headers: headers,
+                authToken: authToken,
+                retryPolicy: nil
+            )
+            return await executeResult(request, as: Success.self, error: APIError.self)
+        } catch let error as SwiftRestClientError {
+            return .failure(error)
+        } catch {
+            return .failure(normalize(error))
+        }
+    }
+
+    public func putResult<Body: Encodable & Sendable, Success: Decodable & Sendable, APIError: Decodable & Sendable>(
+        _ path: String,
+        body: Body,
+        as type: Success.Type = Success.self,
+        error errorType: APIError.Type = APIError.self,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async -> SwiftRestResult<Success, APIError> {
+        _ = type
+        _ = errorType
+        do {
+            let request = try makeRequest(
+                path: path,
+                method: .put,
+                body: body,
+                parameters: parameters,
+                headers: headers,
+                authToken: authToken,
+                retryPolicy: nil
+            )
+            return await executeResult(request, as: Success.self, error: APIError.self)
+        } catch let error as SwiftRestClientError {
+            return .failure(error)
+        } catch {
+            return .failure(normalize(error))
+        }
+    }
+
+    public func patchResult<Body: Encodable & Sendable, Success: Decodable & Sendable, APIError: Decodable & Sendable>(
+        _ path: String,
+        body: Body,
+        as type: Success.Type = Success.self,
+        error errorType: APIError.Type = APIError.self,
+        parameters: [String: String] = [:],
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async -> SwiftRestResult<Success, APIError> {
+        _ = type
+        _ = errorType
+        do {
+            let request = try makeRequest(
+                path: path,
+                method: .patch,
+                body: body,
+                parameters: parameters,
+                headers: headers,
+                authToken: authToken,
+                retryPolicy: nil
+            )
+            return await executeResult(request, as: Success.self, error: APIError.self)
+        } catch let error as SwiftRestClientError {
+            return .failure(error)
+        } catch {
+            return .failure(normalize(error))
+        }
+    }
+
     // MARK: - Request Builders
 
     private func makeRequest(
@@ -681,6 +937,33 @@ public actor SwiftRestClient: RestClientType {
 
     private func effectiveJSONCoding(for request: SwiftRestRequest) -> SwiftRestJSONCoding {
         request.jsonCoding ?? config.jsonCoding
+    }
+
+    private func decodeResponseData<T: Decodable & Sendable>(
+        _ raw: SwiftRestRawResponse,
+        as type: T.Type,
+        coding: SwiftRestJSONCoding
+    ) throws -> T? {
+        _ = type
+
+        guard !raw.rawData.isEmpty else {
+            return nil
+        }
+
+        let decoder = coding.makeDecoder()
+        do {
+            if T.self == Data.self, let value = raw.rawData as? T {
+                return value
+            }
+            if T.self == String.self,
+               let text = raw.text(),
+               let value = text as? T {
+                return value
+            }
+            return try Json.parse(data: raw.rawData, using: decoder)
+        } catch {
+            throw SwiftRestClientError.decodingError(underlying: ErrorContext(error))
+        }
     }
 
     private func buildRequestURL(for request: SwiftRestRequest) throws -> URL {
@@ -806,6 +1089,57 @@ public actor SwiftRestClient: RestClientType {
         return normalizedToken(accessToken)
     }
 
+    private func shouldAttemptAuthRefresh(
+        for request: SwiftRestRequest,
+        didAttemptAuthRefresh: Bool
+    ) -> Bool {
+        guard authRefresh.isEnabled, !didAttemptAuthRefresh else {
+            return false
+        }
+
+        let hasPerRequestToken = normalizedToken(request.authToken) != nil
+        if hasPerRequestToken && !authRefresh.appliesToPerRequestToken {
+            return false
+        }
+
+        if hasPerRequestToken {
+            return true
+        }
+
+        return normalizedToken(accessToken) != nil || accessTokenProvider != nil
+    }
+
+    private func refreshAccessToken() async throws -> String? {
+        guard authRefresh.isEnabled else {
+            return nil
+        }
+
+        if let task = authRefreshTask {
+            return try await consumeRefreshTask(task)
+        }
+
+        let refresh = authRefresh
+        let task = Task<String?, Error> {
+            try await refresh.refreshToken()
+        }
+
+        authRefreshTask = task
+        defer { authRefreshTask = nil }
+        return try await consumeRefreshTask(task)
+    }
+
+    private func consumeRefreshTask(_ task: Task<String?, Error>) async throws -> String? {
+        do {
+            let refreshedToken = normalizedToken(try await task.value)
+            accessToken = refreshedToken
+            return refreshedToken
+        } catch let cancellation as CancellationError {
+            throw cancellation
+        } catch {
+            throw SwiftRestClientError.authRefreshFailed(underlying: ErrorContext(error))
+        }
+    }
+
     private func normalizedToken(_ token: String?) -> String? {
         guard let token else {
             return nil
@@ -880,6 +1214,14 @@ public actor SwiftRestClient: RestClientType {
                 return "\(key): \(sanitized)"
             }
             .joined(separator: ", ")
+    }
+
+    private func logAuthRefresh(_ message: String) {
+        let logging = config.debugLogging
+        guard logging.isEnabled else {
+            return
+        }
+        logging.handler("[SwiftRest] auth refresh: \(message)")
     }
 
     private func shouldRetry(_ error: SwiftRestClientError, policy: RetryPolicy) -> Bool {

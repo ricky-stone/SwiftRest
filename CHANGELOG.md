@@ -1,5 +1,32 @@
 # Changelog
 
+## 3.4.0 - 2026-02-18
+
+### Added
+- Built-in auth refresh support:
+  - `SwiftRestAuthRefresh`
+  - `SwiftRestConfig.authRefresh`
+  - `SwiftRestConfig.authRefresh(...)`
+  - `SwiftRestClient.setAuthRefresh(...)`
+  - `SwiftRestClient.clearAuthRefresh()`
+- Automatic unauthorized flow (opt-in):
+  - `401` triggers refresh callback
+  - request retries once with refreshed token
+  - single-flight refresh sharing across concurrent requests
+- Typed result-style API for easy branching:
+  - `SwiftRestResult<Success, APIError>`
+  - `executeResult(...)`
+  - `getResult(...)`
+  - `deleteResult(...)`
+  - `postResult(...)`
+  - `putResult(...)`
+  - `patchResult(...)`
+- New `SwiftRestClientError.authRefreshFailed(...)` error case.
+- Expanded test coverage for refresh, single-flight behavior, per-request policy, and result-style handling.
+
+### Changed
+- README rewritten with beginner and power-user sections, including Swift and SwiftUI examples.
+
 ## 3.3.0 - 2026-02-18
 
 ### Added
