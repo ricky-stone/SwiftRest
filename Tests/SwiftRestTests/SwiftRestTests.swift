@@ -1159,7 +1159,7 @@ private actor RefreshedTokensSink {
     )
     #expect(SwiftRestConfig.standard.debugLogging.isEnabled == false)
     #expect(SwiftRestConfig.standard.authRefresh.isEnabled == false)
-    #expect(SwiftRestVersion.current == "4.2.0")
+    #expect(SwiftRestVersion.current == "4.2.1")
 
     _ = try SwiftRestClient("https://api.example.com")
 }

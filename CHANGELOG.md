@@ -1,5 +1,16 @@
 # Changelog
 
+## 4.2.1 - 2026-02-18
+
+### Changed
+- README expanded with additional beginner-friendly examples:
+  - query params without a model (`.parameters` / `.parameter`)
+  - success-only request handling with `raw.isSuccess`
+  - multipart upload with manual raw request body
+  - pagination using response headers
+  - auth-refresh failure handling (clear session + route to login)
+- README token store example now includes `setAccessToken` and `clear` helpers for consistency.
+
 ## 4.2.0 - 2026-02-18
 
 ### Added

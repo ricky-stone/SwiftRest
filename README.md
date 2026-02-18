@@ -201,9 +201,18 @@ actor SessionStore {
     var accessToken: String? { accessTokenValue }   // read
     var refreshToken: String? { refreshTokenValue } // read
 
+    func setAccessToken(_ token: String) {
+        self.accessTokenValue = token
+    }
+
     func setTokens(accessToken: String, refreshToken: String?) {
         self.accessTokenValue = accessToken
         self.refreshTokenValue = refreshToken
+    }
+
+    func clear() {
+        self.accessTokenValue = nil
+        self.refreshTokenValue = nil
     }
 }
 ```
@@ -304,6 +313,26 @@ let client = try SwiftRest
     .accessTokenProvider { await sessionStore.accessToken }
     .autoRefresh(refresh)
     .client
+```
+
+### If refresh fails: clear tokens and log out
+
+```swift
+do {
+    let profile: User = try await client.path("secure/profile").get().value()
+    print(profile.firstName)
+} catch let error as SwiftRestClientError {
+    switch error {
+    case .authRefreshFailed:
+        await sessionStore.clear()
+        // Route user to login screen
+    case .httpError(let details) where details.statusCode == 401:
+        await sessionStore.clear()
+        // Route user to login screen
+    default:
+        print(error.userMessage)
+    }
+}
 ```
 
 ## Per-Request Auth Overrides
@@ -416,6 +445,30 @@ if raw.isSuccess {
 }
 ```
 
+### Multipart upload (manual raw request)
+
+```swift
+let boundary = "Boundary-\(UUID().uuidString)"
+var body = Data()
+
+func append(_ string: String) {
+    body.append(Data(string.utf8))
+}
+
+append("--\(boundary)\r\n")
+append("Content-Disposition: form-data; name=\"file\"; filename=\"avatar.jpg\"\r\n")
+append("Content-Type: image/jpeg\r\n\r\n")
+body.append(fileData) // Data loaded from disk/camera
+append("\r\n--\(boundary)--\r\n")
+
+let request = SwiftRestRequest(path: "uploads/avatar", method: .post)
+    .header("Content-Type", "multipart/form-data; boundary=\(boundary)")
+    .rawBody(body)
+
+let upload = try await client.executeRaw(request)
+print(upload.statusCode)
+```
+
 ### Value + headers together
 
 ```swift
@@ -426,6 +479,28 @@ let result = try await client
 
 print(result.value.firstName)
 print(result.headers["x-request-id"] ?? "missing")
+```
+
+### Pagination with headers
+
+```swift
+let firstPage: SwiftRestResponse<[User]> = try await client
+    .path("users")
+    .parameters(["page": "1", "pageSize": "20"])
+    .get()
+    .response()
+
+let users = firstPage.data ?? []
+let nextPage = firstPage.header("x-next-page")
+
+if let nextPage {
+    let secondPage: [User] = try await client
+        .path("users")
+        .parameters(["page": nextPage, "pageSize": "20"])
+        .get()
+        .value()
+    print("Loaded \(secondPage.count) more users")
+}
 ```
 
 ## JSON Options (Flexible)
@@ -553,4 +628,4 @@ Thanks to everyone who tests, reports issues, and contributes improvements.
 
 ## Version
 
-Current source version marker: `SwiftRestVersion.current == "4.2.0"`
+Current source version marker: `SwiftRestVersion.current == "4.2.1"`
