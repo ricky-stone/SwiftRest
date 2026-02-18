@@ -66,13 +66,17 @@ public struct SwiftRestConfig: Sendable {
     /// Optional provider to resolve bearer token dynamically per request.
     public var accessTokenProvider: SwiftRestAccessTokenProvider?
 
+    /// Optional request/response debug logging.
+    public var debugLogging: SwiftRestDebugLogging
+
     public init(
         baseHeaders: HTTPHeaders = HTTPHeaders(),
         timeout: TimeInterval = 30,
         retryPolicy: RetryPolicy = .none,
         jsonCoding: SwiftRestJSONCoding = .foundationDefault,
         accessToken: String? = nil,
-        accessTokenProvider: SwiftRestAccessTokenProvider? = nil
+        accessTokenProvider: SwiftRestAccessTokenProvider? = nil,
+        debugLogging: SwiftRestDebugLogging = .disabled
     ) {
         self.baseHeaders = baseHeaders
         self.timeout = max(0.1, timeout)
@@ -80,6 +84,7 @@ public struct SwiftRestConfig: Sendable {
         self.jsonCoding = jsonCoding
         self.accessToken = accessToken
         self.accessTokenProvider = accessTokenProvider
+        self.debugLogging = debugLogging
     }
 
     /// Recommended default profile for most apps.
@@ -152,9 +157,21 @@ public struct SwiftRestConfig: Sendable {
         copy.accessTokenProvider = provider
         return copy
     }
+
+    public func debugLogging(_ logging: SwiftRestDebugLogging) -> Self {
+        var copy = self
+        copy.debugLogging = logging
+        return copy
+    }
+
+    public func debugLogging(_ enabled: Bool) -> Self {
+        var copy = self
+        copy.debugLogging = enabled ? .basic : .disabled
+        return copy
+    }
 }
 
 /// Source-level version marker for this release line.
 public enum SwiftRestVersion {
-    public static let current = "3.2.0"
+    public static let current = "3.3.0"
 }

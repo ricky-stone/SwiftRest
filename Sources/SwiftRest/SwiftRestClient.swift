@@ -52,10 +52,18 @@ public actor SwiftRestClient: RestClientType {
                     requestURL: requestURL,
                     resolvedAuthToken: resolvedAuthToken
                 )
+                logOutgoingRequest(urlRequest, attempt: attempt, maxAttempts: policy.maxAttempts)
 
                 let startTime = Date()
                 let (data, urlResponse) = try await session.data(for: urlRequest)
                 let raw = try processRawResponse(data, urlResponse, startTime)
+                logIncomingResponse(
+                    raw,
+                    method: request.method.rawValue,
+                    requestURL: requestURL,
+                    attempt: attempt,
+                    maxAttempts: policy.maxAttempts
+                )
 
                 if !allowHTTPError, !raw.isSuccess {
                     throw SwiftRestClientError.httpError(makeErrorResponse(from: raw))
@@ -200,6 +208,24 @@ public actor SwiftRestClient: RestClientType {
         return try await executeRaw(request, allowHTTPError: allowHTTPError)
     }
 
+    public func getRaw<Query: Encodable & Sendable>(
+        _ path: String,
+        query: Query,
+        headers: [String: String] = [:],
+        authToken: String? = nil,
+        allowHTTPError: Bool = false
+    ) async throws -> SwiftRestRawResponse {
+        let request = try makeRequest(
+            path: path,
+            method: .get,
+            query: query,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await executeRaw(request, allowHTTPError: allowHTTPError)
+    }
+
     @discardableResult
     public func get<T: Decodable & Sendable>(
         _ path: String,
@@ -212,6 +238,25 @@ public actor SwiftRestClient: RestClientType {
             path: path,
             method: .get,
             parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await execute(request, as: type)
+    }
+
+    @discardableResult
+    public func get<T: Decodable & Sendable, Query: Encodable & Sendable>(
+        _ path: String,
+        as type: T.Type = T.self,
+        query: Query,
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async throws -> T {
+        let request = try makeRequest(
+            path: path,
+            method: .get,
+            query: query,
             headers: headers,
             authToken: authToken,
             retryPolicy: nil
@@ -239,6 +284,26 @@ public actor SwiftRestClient: RestClientType {
         return try await executeAsyncWithResponse(request)
     }
 
+    /// Executes `GET` and returns both metadata and decoded payload.
+    public func getResponse<T: Decodable & Sendable, Query: Encodable & Sendable>(
+        _ path: String,
+        as type: T.Type = T.self,
+        query: Query,
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async throws -> SwiftRestResponse<T> {
+        _ = type
+        let request = try makeRequest(
+            path: path,
+            method: .get,
+            query: query,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await executeAsyncWithResponse(request)
+    }
+
     public func deleteRaw(
         _ path: String,
         parameters: [String: String] = [:],
@@ -250,6 +315,24 @@ public actor SwiftRestClient: RestClientType {
             path: path,
             method: .delete,
             parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await executeRaw(request, allowHTTPError: allowHTTPError)
+    }
+
+    public func deleteRaw<Query: Encodable & Sendable>(
+        _ path: String,
+        query: Query,
+        headers: [String: String] = [:],
+        authToken: String? = nil,
+        allowHTTPError: Bool = false
+    ) async throws -> SwiftRestRawResponse {
+        let request = try makeRequest(
+            path: path,
+            method: .delete,
+            query: query,
             headers: headers,
             authToken: authToken,
             retryPolicy: nil
@@ -276,6 +359,25 @@ public actor SwiftRestClient: RestClientType {
         return try await execute(request, as: type)
     }
 
+    @discardableResult
+    public func delete<T: Decodable & Sendable, Query: Encodable & Sendable>(
+        _ path: String,
+        as type: T.Type = T.self,
+        query: Query,
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async throws -> T {
+        let request = try makeRequest(
+            path: path,
+            method: .delete,
+            query: query,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await execute(request, as: type)
+    }
+
     /// Executes `DELETE` and returns both metadata and decoded payload.
     public func deleteResponse<T: Decodable & Sendable>(
         _ path: String,
@@ -289,6 +391,26 @@ public actor SwiftRestClient: RestClientType {
             path: path,
             method: .delete,
             parameters: parameters,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: nil
+        )
+        return try await executeAsyncWithResponse(request)
+    }
+
+    /// Executes `DELETE` and returns both metadata and decoded payload.
+    public func deleteResponse<T: Decodable & Sendable, Query: Encodable & Sendable>(
+        _ path: String,
+        as type: T.Type = T.self,
+        query: Query,
+        headers: [String: String] = [:],
+        authToken: String? = nil
+    ) async throws -> SwiftRestResponse<T> {
+        _ = type
+        let request = try makeRequest(
+            path: path,
+            method: .delete,
+            query: query,
             headers: headers,
             authToken: authToken,
             retryPolicy: nil
@@ -510,6 +632,25 @@ public actor SwiftRestClient: RestClientType {
         return request
     }
 
+    private func makeRequest<Query: Encodable & Sendable>(
+        path: String,
+        method: HTTPMethod,
+        query: Query,
+        headers: [String: String],
+        authToken: String?,
+        retryPolicy: RetryPolicy?
+    ) throws -> SwiftRestRequest {
+        let encoded = try SwiftRestQuery.encode(query, using: config.jsonCoding.makeEncoder())
+        return makeRequest(
+            path: path,
+            method: method,
+            parameters: encoded,
+            headers: headers,
+            authToken: authToken,
+            retryPolicy: retryPolicy
+        )
+    }
+
     private func makeRequest<Body: Encodable & Sendable>(
         path: String,
         method: HTTPMethod,
@@ -671,6 +812,74 @@ public actor SwiftRestClient: RestClientType {
         }
         let value = token.trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? nil : value
+    }
+
+    private func logOutgoingRequest(
+        _ request: URLRequest,
+        attempt: Int,
+        maxAttempts: Int
+    ) {
+        let logging = config.debugLogging
+        guard logging.isEnabled else {
+            return
+        }
+
+        let method = request.httpMethod ?? "GET"
+        let url = request.url?.absoluteString ?? "unknown-url"
+        logging.handler("[SwiftRest] -> \(method) \(url) [attempt \(attempt)/\(maxAttempts)]")
+
+        guard logging.includeHeaders,
+              let headers = request.allHTTPHeaderFields,
+              !headers.isEmpty
+        else {
+            return
+        }
+
+        logging.handler("[SwiftRest] request headers: \(redactedHeadersString(from: headers, using: logging))")
+    }
+
+    private func logIncomingResponse(
+        _ response: SwiftRestRawResponse,
+        method: String,
+        requestURL: URL,
+        attempt: Int,
+        maxAttempts: Int
+    ) {
+        let logging = config.debugLogging
+        guard logging.isEnabled else {
+            return
+        }
+
+        let elapsedMs = Int((response.responseTime ?? 0) * 1_000)
+        let finalURL = response.finalURL?.absoluteString ?? requestURL.absoluteString
+        logging.handler(
+            "[SwiftRest] <- \(response.statusCode) \(method) \(finalURL) (\(elapsedMs) ms) [attempt \(attempt)/\(maxAttempts)]"
+        )
+
+        guard logging.includeHeaders, !response.headers.dictionary.isEmpty else {
+            return
+        }
+
+        logging.handler(
+            "[SwiftRest] response headers: \(redactedHeadersString(from: response.headers.dictionary, using: logging))"
+        )
+    }
+
+    private func redactedHeadersString(
+        from headers: [String: String],
+        using logging: SwiftRestDebugLogging
+    ) -> String {
+        headers
+            .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
+            .map { key, value in
+                let isSensitive = logging.redactedHeaderNames.contains(key.lowercased())
+                    || key.lowercased().contains("authorization")
+                    || key.lowercased().contains("token")
+                    || key.lowercased().contains("secret")
+                let sanitized = isSensitive ? "<redacted>" : value
+                return "\(key): \(sanitized)"
+            }
+            .joined(separator: ", ")
     }
 
     private func shouldRetry(_ error: SwiftRestClientError, policy: RetryPolicy) -> Bool {

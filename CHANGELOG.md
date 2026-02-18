@@ -1,5 +1,30 @@
 # Changelog
 
+## 3.3.0 - 2026-02-18
+
+### Added
+- Query model encoding helper: `SwiftRestQuery.encode(...)`.
+- Request builder query helpers:
+  - `SwiftRestRequest.addQuery(...)`
+  - `SwiftRestRequest.query(...)`
+- Beginner-friendly query-model overloads:
+  - `getRaw(..., query: ...)`
+  - `get(..., query: ...)`
+  - `getResponse(..., query: ...)`
+  - `deleteRaw(..., query: ...)`
+  - `delete(..., query: ...)`
+  - `deleteResponse(..., query: ...)`
+- Debug logging configuration:
+  - `SwiftRestDebugLogging`
+  - `SwiftRestConfig.debugLogging`
+  - `SwiftRestConfig.debugLogging(...)`
+- New tests for query encoding, query overloads, and redacted logging output.
+
+### Changed
+- `SwiftRestClient` now logs request/response summaries when debug logging is enabled.
+- Header logging automatically redacts sensitive header values (authorization, token-like, cookie, secret-like).
+- README expanded with beginner-focused query-model and logging examples.
+
 ## 3.2.0 - 2026-02-18
 
 ### Added

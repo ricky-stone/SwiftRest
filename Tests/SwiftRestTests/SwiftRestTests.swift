@@ -26,6 +26,21 @@ struct SnakeConfigResponse: Codable, Equatable, Sendable {
     let updatedUtc: Date
 }
 
+private struct UserListQuery: Encodable, Sendable {
+    let page: Int
+    let search: String
+    let includeInactive: Bool
+}
+
+private struct NestedQueryFlags: Encodable, Sendable {
+    let featured: Bool
+}
+
+private struct NestedUserQuery: Encodable, Sendable {
+    let page: Int
+    let flags: NestedQueryFlags
+}
+
 private final class EchoAuthURLProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool {
         true
@@ -60,11 +75,106 @@ private final class EchoAuthURLProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
+private final class EchoQueryURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+
+        let rawQuery = url.query ?? "none"
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: [
+                "Content-Type": "application/json",
+                "X-Observed-Query": rawQuery
+            ]
+        )!
+
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data())
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+private final class SimpleSuccessURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        )!
+
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data())
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
 private func makeAuthEchoClient(config: SwiftRestConfig = .standard) throws -> SwiftRestClient {
     let sessionConfiguration = URLSessionConfiguration.ephemeral
     sessionConfiguration.protocolClasses = [EchoAuthURLProtocol.self]
     let session = URLSession(configuration: sessionConfiguration)
     return try SwiftRestClient("https://api.example.com", config: config, session: session)
+}
+
+private func makeQueryEchoClient(config: SwiftRestConfig = .standard) throws -> SwiftRestClient {
+    let sessionConfiguration = URLSessionConfiguration.ephemeral
+    sessionConfiguration.protocolClasses = [EchoQueryURLProtocol.self]
+    let session = URLSession(configuration: sessionConfiguration)
+    return try SwiftRestClient("https://api.example.com", config: config, session: session)
+}
+
+private func makeSimpleSuccessClient(config: SwiftRestConfig = .standard) throws -> SwiftRestClient {
+    let sessionConfiguration = URLSessionConfiguration.ephemeral
+    sessionConfiguration.protocolClasses = [SimpleSuccessURLProtocol.self]
+    let session = URLSession(configuration: sessionConfiguration)
+    return try SwiftRestClient("https://api.example.com", config: config, session: session)
+}
+
+private final class LogCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var messages: [String] = []
+
+    func append(_ message: String) {
+        lock.lock()
+        messages.append(message)
+        lock.unlock()
+    }
+
+    func snapshot() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return messages
+    }
 }
 
 @Test func testJsonHelperEncodingDecoding() throws {
@@ -98,6 +208,13 @@ private func makeAuthEchoClient(config: SwiftRestConfig = .standard) throws -> S
     #expect(chainable.headers["x-app"] == "Demo")
     #expect(chainable.parameters["page"] == "2")
     #expect(chainable.retryPolicy?.maxAttempts == 2)
+
+    let queryRequest = try SwiftRestRequest.get("users").query(
+        UserListQuery(page: 1, search: "ricky", includeInactive: false)
+    )
+    #expect(queryRequest.parameters["page"] == "1")
+    #expect(queryRequest.parameters["search"] == "ricky")
+    #expect(queryRequest.parameters["includeInactive"] == "false")
 }
 
 @Test func testRawResponseHelpers() throws {
@@ -269,6 +386,68 @@ private func makeAuthEchoClient(config: SwiftRestConfig = .standard) throws -> S
     #expect(raw.header("x-observed-authorization") == "Bearer provider-token")
 }
 
+@Test func testQueryModelSupportForGetAndDelete() async throws {
+    let client = try makeQueryEchoClient()
+    let query = UserListQuery(page: 2, search: "ricky", includeInactive: true)
+
+    let getRaw = try await client.getRaw("users", query: query)
+    let getQuery = getRaw.header("x-observed-query") ?? ""
+    #expect(getQuery.contains("page=2"))
+    #expect(getQuery.contains("search=ricky"))
+    #expect(getQuery.contains("includeInactive=true"))
+
+    let deleteRaw = try await client.deleteRaw("users", query: query)
+    let deleteQuery = deleteRaw.header("x-observed-query") ?? ""
+    #expect(deleteQuery.contains("page=2"))
+    #expect(deleteQuery.contains("search=ricky"))
+    #expect(deleteQuery.contains("includeInactive=true"))
+}
+
+@Test func testNestedQueryEncodingFlattensObjects() throws {
+    let encoded = try SwiftRestQuery.encode(
+        NestedUserQuery(
+            page: 1,
+            flags: NestedQueryFlags(featured: true)
+        )
+    )
+
+    #expect(encoded["page"] == "1")
+    #expect(encoded["flags.featured"] == "true")
+}
+
+@Test func testQueryModelUsesClientKeyEncodingStrategy() async throws {
+    let client = try makeQueryEchoClient(config: .webAPI)
+    let query = UserListQuery(page: 1, search: "ricky", includeInactive: true)
+
+    let raw = try await client.getRaw("users", query: query)
+    let observed = raw.header("x-observed-query") ?? ""
+    #expect(observed.contains("include_inactive=true"))
+    #expect(!observed.contains("includeInactive=true"))
+}
+
+@Test func testDebugLoggingRedactsSensitiveHeaders() async throws {
+    let collector = LogCollector()
+    let logging = SwiftRestDebugLogging(
+        isEnabled: true,
+        includeHeaders: true,
+        handler: { collector.append($0) }
+    )
+
+    let client = try makeSimpleSuccessClient(
+        config: .standard
+            .accessToken("super-secret-token")
+            .debugLogging(logging)
+    )
+
+    _ = try await client.getRaw("users/1")
+
+    let output = collector.snapshot().joined(separator: "\n").lowercased()
+    #expect(output.contains("[swiftrest] -> get"))
+    #expect(output.contains("[swiftrest] <- 200 get"))
+    #expect(output.contains("authorization: <redacted>"))
+    #expect(!output.contains("super-secret-token"))
+}
+
 @Test func testStandardConfigDefaultsAndVersionMarker() throws {
     #expect(SwiftRestConfig.standard.baseHeaders["accept"] == "application/json")
     #expect(SwiftRestConfig.standard.timeout == 30)
@@ -280,7 +459,8 @@ private func makeAuthEchoClient(config: SwiftRestConfig = .standard) throws -> S
         SwiftRestConfig.standard.dateDecodingStrategy(.iso8601).jsonCoding.dateDecodingStrategy
             == .iso8601
     )
-    #expect(SwiftRestVersion.current == "3.2.0")
+    #expect(SwiftRestConfig.standard.debugLogging.isEnabled == false)
+    #expect(SwiftRestVersion.current == "3.3.0")
 
     _ = try SwiftRestClient("https://api.example.com")
 }

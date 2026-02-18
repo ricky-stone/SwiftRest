@@ -18,6 +18,7 @@ public enum SwiftRestClientError: Error, Sendable {
     case invalidBaseURL(String)
     case invalidURLComponents
     case invalidFinalURL
+    case invalidQueryParameters(reason: String)
     case networkError(underlying: ErrorContext)
     case decodingError(underlying: ErrorContext)
     case httpError(ErrorResponse)
@@ -34,6 +35,8 @@ extension SwiftRestClientError: LocalizedError {
             return "Unable to construct URL components."
         case .invalidFinalURL:
             return "The final URL is invalid after appending path components or query items."
+        case .invalidQueryParameters(let reason):
+            return "Failed to encode query parameters: \(reason)"
         case .networkError(let context):
             return "A network error occurred: \(context.description)"
         case .decodingError(let context):
@@ -60,6 +63,8 @@ public extension SwiftRestClientError {
             return "Unable to construct URL."
         case .invalidFinalURL:
             return "Invalid final URL after appending path or query."
+        case .invalidQueryParameters(let reason):
+            return "Invalid query parameters: \(reason)"
         case .networkError(let context):
             return "Network error: \(context.description)"
         case .decodingError(let context):

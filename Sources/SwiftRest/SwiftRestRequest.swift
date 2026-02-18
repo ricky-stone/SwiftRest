@@ -44,6 +44,14 @@ public struct SwiftRestRequest: Sendable {
         }
     }
 
+    public mutating func addQuery<Query: Encodable & Sendable>(
+        _ query: Query,
+        using encoder: JSONEncoder = JSONEncoder()
+    ) throws {
+        let encoded = try SwiftRestQuery.encode(query, using: encoder)
+        addParameters(encoded)
+    }
+
     public mutating func addJsonBody<T: Encodable & Sendable>(
         _ object: T,
         using encoder: JSONEncoder = JSONEncoder()
@@ -143,6 +151,15 @@ public struct SwiftRestRequest: Sendable {
     public func parameters(_ values: [String: String]) -> Self {
         var copy = self
         copy.addParameters(values)
+        return copy
+    }
+
+    public func query<Query: Encodable & Sendable>(
+        _ query: Query,
+        using encoder: JSONEncoder = JSONEncoder()
+    ) throws -> Self {
+        var copy = self
+        try copy.addQuery(query, using: encoder)
         return copy
     }
 

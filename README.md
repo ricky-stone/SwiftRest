@@ -111,6 +111,54 @@ Auth precedence is:
 2. token provider (`setAccessTokenProvider` / `config.accessTokenProvider(...)`)
 3. global token (`setAccessToken` / `config.accessToken(...)`)
 
+## Query Models (No Manual Dictionaries)
+
+### GET with a query model
+
+```swift
+struct UserQuery: Encodable, Sendable {
+    let page: Int
+    let search: String
+    let includeInactive: Bool
+}
+
+let query = UserQuery(page: 1, search: "ricky", includeInactive: false)
+let users: [User] = try await client.get("users", query: query)
+```
+
+Query models use your client JSON key strategy. For example, with `config: .webAPI`, `includeInactive` becomes `include_inactive`.
+
+### GET response + headers with a query model
+
+```swift
+let query = UserQuery(page: 1, search: "ricky", includeInactive: false)
+let response: SwiftRestResponse<[User]> = try await client.getResponse("users", query: query)
+
+print(response.statusCode)
+print(response.headers["x-request-id"] ?? "missing")
+print(response.data?.count ?? 0)
+```
+
+### DELETE with a query model
+
+```swift
+let query = UserQuery(page: 1, search: "ricky", includeInactive: false)
+let _: NoContent = try await client.delete("users", query: query)
+```
+
+### If you want encoded query params for any call
+
+```swift
+struct SearchQuery: Encodable, Sendable {
+    let term: String
+    let page: Int
+}
+
+let params = try SwiftRestQuery.encode(SearchQuery(term: "swift", page: 1))
+let raw = try await client.postRaw("search/log", body: ["event": "tap"], parameters: params)
+print(raw.statusCode)
+```
+
 ## One Call: Data + Headers
 
 ### Compact
@@ -299,6 +347,45 @@ let jsonObject = try raw.jsonObject()
 let prettyJSON = try raw.prettyPrintedJSON()
 ```
 
+## Debug Logging (Secrets Redacted)
+
+### Quick toggle
+
+```swift
+let client = try SwiftRestClient(
+    "https://api.example.com",
+    config: .standard.debugLogging(true)
+)
+```
+
+### Log request/response headers (redacted)
+
+```swift
+let client = try SwiftRestClient(
+    "https://api.example.com",
+    config: .standard.debugLogging(.headers)
+)
+```
+
+SwiftRest will automatically redact sensitive header values (for example `Authorization`, cookies, token-like headers).
+
+### Custom log output
+
+```swift
+let logging = SwiftRestDebugLogging(
+    isEnabled: true,
+    includeHeaders: true,
+    handler: { line in
+        print("NETWORK:", line)
+    }
+)
+
+let client = try SwiftRestClient(
+    "https://api.example.com",
+    config: .standard.debugLogging(logging)
+)
+```
+
 ## Request Builder Styles
 
 ### Mutating style
@@ -319,6 +406,13 @@ let request = SwiftRestRequest.get("users")
     .retries(maxRetries: 2, retryDelay: 0.5)
 ```
 
+Query model on request builder:
+
+```swift
+let request = try SwiftRestRequest.get("users")
+    .query(UserQuery(page: 1, search: "ricky", includeInactive: false))
+```
+
 ## Default Config (`.standard`)
 
 When no config is passed, SwiftRest uses `SwiftRestConfig.standard`:
@@ -331,6 +425,7 @@ When no config is passed, SwiftRest uses `SwiftRestConfig.standard`:
   - Retryable status codes: `408, 429, 500, 502, 503, 504`
 - JSON coding: `SwiftRestJSONCoding.foundationDefault` (no date/key assumptions)
 - Global token: none
+- Debug logging: disabled
 
 Custom config:
 
@@ -445,4 +540,4 @@ Thanks to everyone who tests, reports issues, and contributes improvements.
 
 ## Version
 
-Current source version marker: `SwiftRestVersion.current == "3.2.0"`
+Current source version marker: `SwiftRestVersion.current == "3.3.0"`
