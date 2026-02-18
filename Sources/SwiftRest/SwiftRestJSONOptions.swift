@@ -18,6 +18,8 @@ public enum SwiftRestJSONDates: Sendable, Equatable {
 public enum SwiftRestJSONKeys: Sendable, Equatable {
     case useDefaultKeys
     case snakeCase
+    case snakeCaseDecodingOnly
+    case snakeCaseEncodingOnly
 }
 
 extension SwiftRestJSONDates {
@@ -71,6 +73,10 @@ extension SwiftRestJSONKeys {
             return .useDefaultKeys
         case .snakeCase:
             return .convertFromSnakeCase
+        case .snakeCaseDecodingOnly:
+            return .convertFromSnakeCase
+        case .snakeCaseEncodingOnly:
+            return .useDefaultKeys
         }
     }
 
@@ -79,6 +85,10 @@ extension SwiftRestJSONKeys {
         case .useDefaultKeys:
             return .useDefaultKeys
         case .snakeCase:
+            return .convertToSnakeCase
+        case .snakeCaseDecodingOnly:
+            return .useDefaultKeys
+        case .snakeCaseEncodingOnly:
             return .convertToSnakeCase
         }
     }

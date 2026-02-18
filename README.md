@@ -375,6 +375,44 @@ let user: User = try await client
 
 `refreshTokenProvider` above is only used if that call hits `401` and refresh is enabled on the client.
 
+## HTTP Methods (All Supported)
+
+```swift
+// GET
+let users: [User] = try await client.path("users").get().value()
+
+// POST
+let created: User = try await client
+    .path("users")
+    .post(body: CreateUser(firstName: "Ricky"))
+    .value()
+
+// PUT
+let updated: User = try await client
+    .path("users/1")
+    .put(body: CreateUser(firstName: "Ricky Stone"))
+    .value()
+
+// PATCH
+let patched: User = try await client
+    .path("users/1")
+    .patch(body: ["firstName": "Ricky S."])
+    .value()
+
+// DELETE (success/no payload style)
+let deleted = try await client.path("users/1").delete().raw()
+print(deleted.isSuccess)
+
+// HEAD
+let head = try await client.path("users/1").head().raw()
+print(head.statusCode)
+print(head.header("etag") ?? "missing")
+
+// OPTIONS
+let options = try await client.path("users").options().raw()
+print(options.header("allow") ?? "missing")
+```
+
 ## Query and Body Models
 
 ### Query model
@@ -509,14 +547,22 @@ if let nextPage {
 
 ```swift
 .json(.default) // Foundation defaults
+.json(.iso8601) // default keys + ISO8601 dates
 .json(.webAPI)  // snake_case keys + ISO8601 dates
+
+// extra web API presets
+.json(.webAPIFractionalSeconds) // snake_case + ISO8601 fractional seconds
+.json(.webAPIUnixSeconds)       // snake_case + Unix seconds
+.json(.webAPIUnixMilliseconds)  // snake_case + Unix milliseconds
 ```
 
 ### Key strategies
 
 ```swift
-.jsonKeys(.useDefaultKeys) // id, firstName, updatedUtc
-.jsonKeys(.snakeCase)      // first_name, updated_utc
+.jsonKeys(.useDefaultKeys)         // decode+encode default keys
+.jsonKeys(.snakeCase)              // decode+encode snake_case
+.jsonKeys(.snakeCaseDecodingOnly)  // decode snake_case, encode default keys
+.jsonKeys(.snakeCaseEncodingOnly)  // decode default keys, encode snake_case
 ```
 
 ### Date strategies
@@ -628,4 +674,4 @@ Thanks to everyone who tests, reports issues, and contributes improvements.
 
 ## Version
 
-Current source version marker: `SwiftRestVersion.current == "4.2.1"`
+Current source version marker: `SwiftRestVersion.current == "4.3.0"`

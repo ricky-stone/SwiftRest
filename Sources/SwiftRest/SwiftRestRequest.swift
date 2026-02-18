@@ -293,6 +293,14 @@ public extension SwiftRestRequest {
         SwiftRestRequest(path: path, method: .get)
     }
 
+    static func head(_ path: String) -> SwiftRestRequest {
+        SwiftRestRequest(path: path, method: .head)
+    }
+
+    static func options(_ path: String) -> SwiftRestRequest {
+        SwiftRestRequest(path: path, method: .options)
+    }
+
     static func post(_ path: String) -> SwiftRestRequest {
         SwiftRestRequest(path: path, method: .post)
     }

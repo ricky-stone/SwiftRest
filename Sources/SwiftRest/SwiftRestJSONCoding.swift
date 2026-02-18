@@ -97,6 +97,30 @@ public struct SwiftRestJSONCoding: Sendable, Equatable {
         keyEncodingStrategy: .convertToSnakeCase
     )
 
+    /// snake_case keys + ISO8601 dates with fractional seconds.
+    public static let webAPIFractionalSeconds = SwiftRestJSONCoding(
+        dateDecodingStrategy: .iso8601WithFractionalSeconds,
+        dateEncodingStrategy: .iso8601WithFractionalSeconds,
+        keyDecodingStrategy: .convertFromSnakeCase,
+        keyEncodingStrategy: .convertToSnakeCase
+    )
+
+    /// snake_case keys + Unix seconds timestamps.
+    public static let webAPIUnixSeconds = SwiftRestJSONCoding(
+        dateDecodingStrategy: .secondsSince1970,
+        dateEncodingStrategy: .secondsSince1970,
+        keyDecodingStrategy: .convertFromSnakeCase,
+        keyEncodingStrategy: .convertToSnakeCase
+    )
+
+    /// snake_case keys + Unix milliseconds timestamps.
+    public static let webAPIUnixMilliseconds = SwiftRestJSONCoding(
+        dateDecodingStrategy: .millisecondsSince1970,
+        dateEncodingStrategy: .millisecondsSince1970,
+        keyDecodingStrategy: .convertFromSnakeCase,
+        keyEncodingStrategy: .convertToSnakeCase
+    )
+
     public func dateDecodingStrategy(_ strategy: DateDecodingStrategy) -> Self {
         var copy = self
         copy.dateDecodingStrategy = strategy

@@ -1,5 +1,28 @@
 # Changelog
 
+## 4.3.0 - 2026-02-18
+
+### Added
+- V4 request chain now includes:
+  - `.head()`
+  - `.options()`
+- `SwiftRestRequest` static helpers now include:
+  - `.head(...)`
+  - `.options(...)`
+- New JSON coding presets:
+  - `SwiftRestJSONCoding.webAPIFractionalSeconds`
+  - `SwiftRestJSONCoding.webAPIUnixSeconds`
+  - `SwiftRestJSONCoding.webAPIUnixMilliseconds`
+- New key strategy modes:
+  - `SwiftRestJSONKeys.snakeCaseDecodingOnly`
+  - `SwiftRestJSONKeys.snakeCaseEncodingOnly`
+
+### Changed
+- README expanded with:
+  - all HTTP methods examples (`GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS`)
+  - additional common JSON presets
+  - additional key strategy examples
+
 ## 4.2.1 - 2026-02-18
 
 ### Changed

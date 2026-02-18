@@ -113,6 +113,14 @@ public struct SwiftRestPathBuilder: Sendable {
         prepared(method: .get)
     }
 
+    public func head() -> SwiftRestPreparedRequest {
+        prepared(method: .head)
+    }
+
+    public func options() -> SwiftRestPreparedRequest {
+        prepared(method: .options)
+    }
+
     public func delete() -> SwiftRestPreparedRequest {
         prepared(method: .delete)
     }

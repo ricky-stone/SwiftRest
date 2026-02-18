@@ -122,6 +122,39 @@ private final class EchoQueryURLProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
+private final class MethodEchoURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+
+        let method = request.httpMethod ?? "UNKNOWN"
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: [
+                "X-Observed-Method": method
+            ]
+        )!
+
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data())
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
 private final class SimpleSuccessURLProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool {
         true
@@ -421,6 +454,13 @@ private func makeQueryEchoClient(config: SwiftRestConfig = .standard) throws -> 
     return try SwiftRestClient("https://api.example.com", config: config, session: session)
 }
 
+private func makeMethodEchoClient(config: SwiftRestConfig = .standard) throws -> SwiftRestClient {
+    let sessionConfiguration = URLSessionConfiguration.ephemeral
+    sessionConfiguration.protocolClasses = [MethodEchoURLProtocol.self]
+    let session = URLSession(configuration: sessionConfiguration)
+    return try SwiftRestClient("https://api.example.com", config: config, session: session)
+}
+
 private func makeSimpleSuccessClient(config: SwiftRestConfig = .standard) throws -> SwiftRestClient {
     let sessionConfiguration = URLSessionConfiguration.ephemeral
     sessionConfiguration.protocolClasses = [SimpleSuccessURLProtocol.self]
@@ -535,6 +575,16 @@ private actor RefreshedTokensSink {
     #expect(queryRequest.parameters["page"] == "1")
     #expect(queryRequest.parameters["search"] == "ricky")
     #expect(queryRequest.parameters["includeInactive"] == "false")
+}
+
+@Test func testSwiftRestRequestStaticHelpersIncludeHeadAndOptions() {
+    let headRequest = SwiftRestRequest.head("health")
+    #expect(headRequest.method == .head)
+    #expect(headRequest.path == "health")
+
+    let optionsRequest = SwiftRestRequest.options("users")
+    #expect(optionsRequest.method == .options)
+    #expect(optionsRequest.path == "users")
 }
 
 @Test func testRawResponseHelpers() throws {
@@ -669,6 +719,22 @@ private actor RefreshedTokensSink {
     #expect(decoded.maintenanceMessage == "Read-only")
 }
 
+@Test func testJSONCodingAdditionalPresetsAndKeyModes() {
+    #expect(SwiftRestJSONCoding.iso8601.dateDecodingStrategy == .iso8601)
+    #expect(SwiftRestJSONCoding.iso8601.dateEncodingStrategy == .iso8601)
+
+    #expect(SwiftRestJSONCoding.webAPIFractionalSeconds.dateDecodingStrategy == .iso8601WithFractionalSeconds)
+    #expect(SwiftRestJSONCoding.webAPIFractionalSeconds.keyDecodingStrategy == .convertFromSnakeCase)
+
+    #expect(SwiftRestJSONCoding.webAPIUnixSeconds.dateDecodingStrategy == .secondsSince1970)
+    #expect(SwiftRestJSONCoding.webAPIUnixMilliseconds.dateDecodingStrategy == .millisecondsSince1970)
+
+    #expect(SwiftRestJSONKeys.snakeCaseDecodingOnly.decodingStrategy == .convertFromSnakeCase)
+    #expect(SwiftRestJSONKeys.snakeCaseDecodingOnly.encodingStrategy == .useDefaultKeys)
+    #expect(SwiftRestJSONKeys.snakeCaseEncodingOnly.decodingStrategy == .useDefaultKeys)
+    #expect(SwiftRestJSONKeys.snakeCaseEncodingOnly.encodingStrategy == .convertToSnakeCase)
+}
+
 @Test func testGlobalAccessTokenAndPrecedence() async throws {
     let client = try makeAuthEchoClient(config: .standard.accessToken("global-token"))
 
@@ -755,6 +821,16 @@ private actor RefreshedTokensSink {
     default:
         #expect(Bool(false))
     }
+}
+
+@Test func testV4ChainSupportsHeadAndOptionsMethods() async throws {
+    let client = try makeMethodEchoClient()
+
+    let headRaw = try await client.path("health").head().raw()
+    #expect(headRaw.header("x-observed-method") == "HEAD")
+
+    let optionsRaw = try await client.path("users").options().raw()
+    #expect(optionsRaw.header("x-observed-method") == "OPTIONS")
 }
 
 @Test func testV4ChainQueryUsesGlobalJSONCoding() async throws {
@@ -1159,7 +1235,7 @@ private actor RefreshedTokensSink {
     )
     #expect(SwiftRestConfig.standard.debugLogging.isEnabled == false)
     #expect(SwiftRestConfig.standard.authRefresh.isEnabled == false)
-    #expect(SwiftRestVersion.current == "4.2.1")
+    #expect(SwiftRestVersion.current == "4.3.0")
 
     _ = try SwiftRestClient("https://api.example.com")
 }
