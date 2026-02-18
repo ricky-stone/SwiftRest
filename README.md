@@ -125,43 +125,32 @@ let result: SwiftRestResult<User, APIErrorModel> =
 
 ## Headers Made Easy
 
-### Swift
+### Client default headers (every request)
+
+```swift
+let client = try SwiftRest
+    .for("https://api.example.com")
+    .header("X-App", "SnookerLive")
+    .headers([
+        "X-Platform": "iOS",
+        "Accept-Language": "en-GB"
+    ])
+    .client
+```
+
+### Per-request headers (one call only)
 
 ```swift
 let result = try await client
     .path("users/1")
+    .header("X-Trace-Id", UUID().uuidString)
+    .headers(["X-Experiment": "A"])
     .get()
     .valueAndHeaders(as: User.self)
 
 print(result.value.firstName)
 print(result.headers["x-request-id"] ?? "missing")
 print(result.headers["x-rate-limit-remaining"] ?? "0")
-```
-
-### SwiftUI
-
-```swift
-@MainActor
-final class ProfileViewModel: ObservableObject {
-    @Published var name: String = ""
-    @Published var requestId: String = ""
-
-    private let client = try! SwiftRest.for("https://api.example.com").client
-
-    func load() async {
-        do {
-            let result = try await client
-                .path("users/1")
-                .get()
-                .valueAndHeaders(as: User.self)
-            name = result.value.firstName
-            requestId = result.headers["x-request-id"] ?? ""
-        } catch {
-            name = ""
-            requestId = ""
-        }
-    }
-}
 ```
 
 ## Setup Chain Reference
@@ -173,7 +162,10 @@ let client = try SwiftRest
     .accessTokenProvider { await sessionStore.accessToken }
     .autoRefresh(
         endpoint: "auth/refresh",
-        refreshTokenProvider: { await sessionStore.refreshToken }
+        refreshTokenProvider: { await sessionStore.refreshToken },
+        onTokensRefreshed: { accessToken, refreshToken in
+            await sessionStore.setTokens(accessToken: accessToken, refreshToken: refreshToken)
+        }
     )
     .json(.webAPI)
     .jsonDates(.iso8601)
@@ -194,29 +186,92 @@ Auto refresh is built-in and safe for single-client usage.
 
 ### Beginner mode (endpoint-driven)
 
+Step 1, make a token store:
+
+```swift
+actor SessionStore {
+    private var accessTokenValue: String?
+    private var refreshTokenValue: String?
+
+    var accessToken: String? { accessTokenValue }   // read
+    var refreshToken: String? { refreshTokenValue } // read
+
+    func setTokens(accessToken: String, refreshToken: String?) {
+        self.accessTokenValue = accessToken
+        self.refreshTokenValue = refreshToken
+    }
+}
+```
+
+Step 2, configure refresh:
+
 ```swift
 let client = try SwiftRest
     .for("https://api.example.com")
     .accessTokenProvider { await sessionStore.accessToken }
     .autoRefresh(
         endpoint: "auth/refresh",
-        refreshTokenProvider: { await sessionStore.refreshToken }
+        refreshTokenProvider: { await sessionStore.refreshToken },
+        refreshTokenField: "refreshToken",
+        tokenField: "accessToken",
+        refreshTokenResponseField: "refreshToken",
+        onTokensRefreshed: { accessToken, refreshToken in
+            await sessionStore.setTokens(accessToken: accessToken, refreshToken: refreshToken)
+        }
     )
     .client
 ```
 
-If your API uses different field names:
+Providers can also be simple closures when values are already available:
 
 ```swift
-let client = try SwiftRest
-    .for("https://api.example.com")
-    .autoRefresh(
-        endpoint: "auth/refresh",
-        refreshTokenProvider: { await sessionStore.refreshToken },
-        refreshTokenField: "refresh_token",
-        tokenField: "token"
-    )
-    .client
+.accessTokenProvider { "token-value" }
+.autoRefresh(endpoint: "auth/refresh", refreshTokenProvider: { "refresh-value" })
+```
+
+What each setting does:
+
+- `accessTokenProvider`: reads your current access token before requests.
+- `refreshTokenProvider`: reads your current refresh token when a `401` happens.
+- `refreshTokenField`: JSON key sent to refresh endpoint in request body.
+- `tokenField`: JSON key read from refresh response for the new access token.
+- `refreshTokenResponseField`: optional key read from refresh response for rotated refresh token.
+- `onTokensRefreshed`: callback to save refreshed token values to your store/keychain.
+
+Example refresh response:
+
+```json
+{
+  "accessToken": "...",
+  "accessTokenExpiresUtc": "2026-02-18T23:10:04.5435334Z",
+  "refreshToken": "...",
+  "refreshTokenExpiresUtc": "2026-03-20T22:50:04.5435334Z",
+  "tokenType": "Bearer"
+}
+```
+
+Matching config for that response:
+
+```swift
+.autoRefresh(
+    endpoint: "auth/refresh",
+    refreshTokenProvider: { await sessionStore.refreshToken },
+    refreshTokenField: "refreshToken",
+    tokenField: "accessToken",
+    refreshTokenResponseField: "refreshToken"
+)
+```
+
+If your API uses different names, set exact key names:
+
+```swift
+.autoRefresh(
+    endpoint: "auth/refresh",
+    refreshTokenProvider: { await sessionStore.refreshToken },
+    refreshTokenField: "refresh_token",
+    tokenField: "token",
+    refreshTokenResponseField: "refresh_token"
+)
 ```
 
 ### Advanced mode (custom refresh logic with safe bypass context)
@@ -454,4 +509,4 @@ Thanks to everyone who tests, reports issues, and contributes improvements.
 
 ## Version
 
-Current source version marker: `SwiftRestVersion.current == "4.1.0"`
+Current source version marker: `SwiftRestVersion.current == "4.2.0"`

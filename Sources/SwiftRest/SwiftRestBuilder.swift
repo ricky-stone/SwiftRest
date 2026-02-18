@@ -49,6 +49,8 @@ public struct SwiftRestBuilder: Sendable {
         refreshTokenProvider: @escaping SwiftRestRefreshTokenProvider,
         refreshTokenField: String = "refreshToken",
         tokenField: String = "accessToken",
+        refreshTokenResponseField: String? = nil,
+        onTokensRefreshed: SwiftRestTokensRefreshedHandler? = nil,
         headers: [String: String] = [:]
     ) -> Self {
         autoRefresh(
@@ -58,6 +60,8 @@ public struct SwiftRestBuilder: Sendable {
                 refreshTokenProvider: refreshTokenProvider,
                 refreshTokenField: refreshTokenField,
                 tokenField: tokenField,
+                refreshTokenResponseField: refreshTokenResponseField,
+                onTokensRefreshed: onTokensRefreshed,
                 headers: headers
             )
         )

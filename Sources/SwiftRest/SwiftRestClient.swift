@@ -1267,7 +1267,34 @@ public actor SwiftRestClient: RestClientType {
                 )
             }
 
-            return normalizedToken(token)
+            guard let accessToken = normalizedToken(token) else {
+                throw SwiftRestClientError.authRefreshFailed(
+                    underlying: ErrorContext(
+                        description: "Refresh token field \"\(endpointConfig.tokenField)\" was empty."
+                    )
+                )
+            }
+
+            let refreshedRefreshToken: String?
+            if let refreshTokenResponseField = endpointConfig.refreshTokenResponseField {
+                guard let rawRefreshToken = object[refreshTokenResponseField] as? String else {
+                    throw SwiftRestClientError.authRefreshFailed(
+                        underlying: ErrorContext(
+                            description:
+                                "Refresh response missing token field \"\(refreshTokenResponseField)\"."
+                        )
+                    )
+                }
+                refreshedRefreshToken = normalizedToken(rawRefreshToken)
+            } else {
+                refreshedRefreshToken = nil
+            }
+
+            if let onTokensRefreshed = endpointConfig.onTokensRefreshed {
+                try await onTokensRefreshed(accessToken, refreshedRefreshToken)
+            }
+
+            return accessToken
         } catch let error as SwiftRestClientError {
             throw error
         } catch {

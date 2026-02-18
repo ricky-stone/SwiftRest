@@ -1,5 +1,23 @@
 # Changelog
 
+## 4.2.0 - 2026-02-18
+
+### Added
+- Beginner-friendly endpoint refresh save hook:
+  - `onTokensRefreshed` callback for persisting refreshed tokens.
+- Optional endpoint refresh response field mapping:
+  - `refreshTokenResponseField` for rotated refresh token responses.
+- Expanded tests for endpoint refresh callback flows.
+
+### Changed
+- README refresh docs now explain field mapping in beginner detail:
+  - what each closure/field does
+  - exact matching behavior for request/response key names
+  - simple session store pattern for read/write token flow
+- README headers docs now clearly separate:
+  - client default headers
+  - per-request headers
+
 ## 4.1.0 - 2026-02-18
 
 ### Added

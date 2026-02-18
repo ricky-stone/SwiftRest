@@ -3,6 +3,12 @@ import Foundation
 /// Async provider used to return the current refresh token.
 public typealias SwiftRestRefreshTokenProvider = @Sendable () async throws -> String?
 
+/// Optional callback invoked after endpoint refresh resolves new token values.
+public typealias SwiftRestTokensRefreshedHandler = @Sendable (
+    _ accessToken: String,
+    _ refreshToken: String?
+) async throws -> Void
+
 /// Advanced refresh callback for power users.
 ///
 /// Receives a bypass context that does not use normal auth middleware.
@@ -15,6 +21,8 @@ public struct SwiftRestAuthRefreshEndpoint: Sendable {
     public var refreshTokenProvider: SwiftRestRefreshTokenProvider
     public var refreshTokenField: String
     public var tokenField: String
+    public var refreshTokenResponseField: String?
+    public var onTokensRefreshed: SwiftRestTokensRefreshedHandler?
     public var headers: [String: String]
 
     public init(
@@ -23,6 +31,8 @@ public struct SwiftRestAuthRefreshEndpoint: Sendable {
         refreshTokenProvider: @escaping SwiftRestRefreshTokenProvider,
         refreshTokenField: String = "refreshToken",
         tokenField: String = "accessToken",
+        refreshTokenResponseField: String? = nil,
+        onTokensRefreshed: SwiftRestTokensRefreshedHandler? = nil,
         headers: [String: String] = [:]
     ) {
         self.endpoint = endpoint
@@ -30,6 +40,8 @@ public struct SwiftRestAuthRefreshEndpoint: Sendable {
         self.refreshTokenProvider = refreshTokenProvider
         self.refreshTokenField = refreshTokenField
         self.tokenField = tokenField
+        self.refreshTokenResponseField = refreshTokenResponseField
+        self.onTokensRefreshed = onTokensRefreshed
         self.headers = headers
     }
 }
@@ -72,6 +84,8 @@ public struct SwiftRestAuthRefresh: Sendable {
         refreshTokenProvider: @escaping SwiftRestRefreshTokenProvider,
         refreshTokenField: String = "refreshToken",
         tokenField: String = "accessToken",
+        refreshTokenResponseField: String? = nil,
+        onTokensRefreshed: SwiftRestTokensRefreshedHandler? = nil,
         headers: [String: String] = [:]
     ) -> Self {
         SwiftRestAuthRefresh(
@@ -82,6 +96,8 @@ public struct SwiftRestAuthRefresh: Sendable {
                     refreshTokenProvider: refreshTokenProvider,
                     refreshTokenField: refreshTokenField,
                     tokenField: tokenField,
+                    refreshTokenResponseField: refreshTokenResponseField,
+                    onTokensRefreshed: onTokensRefreshed,
                     headers: headers
                 )
             )

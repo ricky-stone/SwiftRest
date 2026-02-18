@@ -270,6 +270,57 @@ private final class EndpointRefreshURLProtocol: URLProtocol, @unchecked Sendable
     }
 }
 
+private final class EndpointRefreshWithRefreshTokenURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+
+        if url.path == "/auth/refresh" {
+            let auth = request.value(forHTTPHeaderField: "Authorization") ?? "none"
+            let bodyText = requestBodyText(request)
+            EndpointRefreshState.shared.record(authHeader: auth, body: bodyText)
+            respond(
+                url: url,
+                statusCode: 200,
+                body: #"{"accessToken":"fresh-token","refreshToken":"fresh-refresh-token"}"#
+            )
+            return
+        }
+
+        let authorization = request.value(forHTTPHeaderField: "Authorization") ?? "none"
+        if authorization == "Bearer fresh-token" {
+            respond(url: url, statusCode: 200, body: #"{"id":1,"name":"Alice"}"#)
+        } else {
+            respond(url: url, statusCode: 401, body: #"{"message":"Unauthorized"}"#)
+        }
+    }
+
+    override func stopLoading() {}
+
+    private func respond(url: URL, statusCode: Int, body: String) {
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: statusCode,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        )!
+
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
 private func requestBodyText(_ request: URLRequest) -> String {
     if let body = request.httpBody,
        !body.isEmpty {
@@ -397,6 +448,12 @@ private func makeEndpointRefreshSession() -> URLSession {
     return URLSession(configuration: sessionConfiguration)
 }
 
+private func makeEndpointRefreshWithRefreshTokenSession() -> URLSession {
+    let sessionConfiguration = URLSessionConfiguration.ephemeral
+    sessionConfiguration.protocolClasses = [EndpointRefreshWithRefreshTokenURLProtocol.self]
+    return URLSession(configuration: sessionConfiguration)
+}
+
 private final class LogCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var messages: [String] = []
@@ -423,6 +480,20 @@ private actor AsyncCounter {
 
     func current() -> Int {
         value
+    }
+}
+
+private actor RefreshedTokensSink {
+    private var accessTokens: [String] = []
+    private var refreshTokens: [String?] = []
+
+    func append(accessToken: String, refreshToken: String?) {
+        accessTokens.append(accessToken)
+        refreshTokens.append(refreshToken)
+    }
+
+    func snapshot() -> (accessTokens: [String], refreshTokens: [String?]) {
+        (accessTokens, refreshTokens)
     }
 }
 
@@ -723,6 +794,58 @@ private actor AsyncCounter {
     let snapshot = EndpointRefreshState.shared.snapshot()
     #expect(snapshot.refreshCalls >= 1)
     #expect(snapshot.refreshAuthHeaders.allSatisfy { $0 == "none" })
+}
+
+@Test func testV4EndpointAutoRefreshOnTokensRefreshedCallback() async throws {
+    let session = makeEndpointRefreshSession()
+    let sink = RefreshedTokensSink()
+
+    let client = try SwiftRest
+        .for("https://api.example.com")
+        .accessToken("expired-token")
+        .autoRefresh(
+            endpoint: "auth/refresh",
+            refreshTokenProvider: { "refresh-1" },
+            onTokensRefreshed: { accessToken, refreshToken in
+                await sink.append(accessToken: accessToken, refreshToken: refreshToken)
+            }
+        )
+        .session(session)
+        .client
+
+    let user: Dummy = try await client.path("secure/profile").get().value()
+    #expect(user == Dummy(id: 1, name: "Alice"))
+
+    let snapshot = await sink.snapshot()
+    #expect(snapshot.accessTokens == ["fresh-token"])
+    #expect(snapshot.refreshTokens.count == 1)
+    #expect(snapshot.refreshTokens[0] == nil)
+}
+
+@Test func testV4EndpointAutoRefreshReadsRefreshTokenFieldAndCallback() async throws {
+    let session = makeEndpointRefreshWithRefreshTokenSession()
+    let sink = RefreshedTokensSink()
+
+    let client = try SwiftRest
+        .for("https://api.example.com")
+        .accessToken("expired-token")
+        .autoRefresh(
+            endpoint: "auth/refresh",
+            refreshTokenProvider: { "refresh-1" },
+            refreshTokenResponseField: "refreshToken",
+            onTokensRefreshed: { accessToken, refreshToken in
+                await sink.append(accessToken: accessToken, refreshToken: refreshToken)
+            }
+        )
+        .session(session)
+        .client
+
+    let user: Dummy = try await client.path("secure/profile").get().value()
+    #expect(user == Dummy(id: 1, name: "Alice"))
+
+    let snapshot = await sink.snapshot()
+    #expect(snapshot.accessTokens == ["fresh-token"])
+    #expect(snapshot.refreshTokens == ["fresh-refresh-token"])
 }
 
 @Test func testV4RequestRefreshTokenProviderOverridesEndpointProvider() async throws {
@@ -1036,7 +1159,7 @@ private actor AsyncCounter {
     )
     #expect(SwiftRestConfig.standard.debugLogging.isEnabled == false)
     #expect(SwiftRestConfig.standard.authRefresh.isEnabled == false)
-    #expect(SwiftRestVersion.current == "4.1.0")
+    #expect(SwiftRestVersion.current == "4.2.0")
 
     _ = try SwiftRestClient("https://api.example.com")
 }
