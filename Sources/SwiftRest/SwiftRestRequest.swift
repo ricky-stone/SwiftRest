@@ -106,6 +106,10 @@ public struct SwiftRestRequest: Sendable {
         self.retryPolicy = policy
     }
 
+    public mutating func configureMethod(_ method: HTTPMethod) {
+        self.method = method
+    }
+
     public mutating func configureJSONCoding(_ coding: SwiftRestJSONCoding) {
         self.jsonCoding = coding
     }
@@ -208,6 +212,12 @@ public struct SwiftRestRequest: Sendable {
     public func retryPolicy(_ policy: RetryPolicy) -> Self {
         var copy = self
         copy.configureRetryPolicy(policy)
+        return copy
+    }
+
+    public func method(_ method: HTTPMethod) -> Self {
+        var copy = self
+        copy.configureMethod(method)
         return copy
     }
 

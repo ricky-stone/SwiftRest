@@ -17,6 +17,11 @@ public struct SwiftRestResponse<T: Decodable & Sendable>: Sendable {
         (200...299).contains(statusCode)
     }
 
+    /// Alias for decoded response payload.
+    public var value: T? {
+        data
+    }
+
     /// UTF-8 string representation of the raw body, when available.
     public var rawValue: String? {
         String(data: rawData, encoding: .utf8)
@@ -43,6 +48,22 @@ public struct SwiftRestResponse<T: Decodable & Sendable>: Sendable {
     /// Returns the first value for a header name.
     public func header(_ name: String) -> String? {
         headers[name]
+    }
+
+    /// Reads a header as integer value.
+    public func headerInt(_ name: String) -> Int? {
+        guard let value = headers[name] else {
+            return nil
+        }
+        return Int(value)
+    }
+
+    /// Reads a header as floating-point value.
+    public func headerDouble(_ name: String) -> Double? {
+        guard let value = headers[name] else {
+            return nil
+        }
+        return Double(value)
     }
 
     /// Returns the body as text with a custom encoding.

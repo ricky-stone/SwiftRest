@@ -105,6 +105,9 @@ public struct SwiftRestConfig: Sendable {
         jsonCoding: .foundationDefault
     )
 
+    /// Alias for `standard`.
+    public static let `default` = standard
+
     /// Convenient preset for APIs that use snake_case keys and ISO8601 dates.
     public static let webAPI = SwiftRestConfig(
         baseHeaders: ["accept": "application/json"],
@@ -184,5 +187,5 @@ public struct SwiftRestConfig: Sendable {
 
 /// Source-level version marker for this release line.
 public enum SwiftRestVersion {
-    public static let current = "3.4.0"
+    public static let current = "4.0.0"
 }

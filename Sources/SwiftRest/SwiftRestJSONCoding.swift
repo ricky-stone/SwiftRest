@@ -80,6 +80,9 @@ public struct SwiftRestJSONCoding: Sendable, Equatable {
     /// Foundation defaults (no assumptions).
     public static let foundationDefault = SwiftRestJSONCoding()
 
+    /// Beginner-friendly alias for Foundation defaults.
+    public static let `default` = foundationDefault
+
     /// Useful when your API uses ISO8601 date strings.
     public static let iso8601 = SwiftRestJSONCoding(
         dateDecodingStrategy: .iso8601,

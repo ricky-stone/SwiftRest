@@ -36,6 +36,9 @@ public struct SwiftRestDebugLogging: Sendable {
     /// Logging disabled.
     public static let disabled = SwiftRestDebugLogging()
 
+    /// Alias for disabled logging.
+    public static let off = SwiftRestDebugLogging.disabled
+
     /// Logs request/response line summaries.
     public static let basic = SwiftRestDebugLogging(isEnabled: true, includeHeaders: false)
 

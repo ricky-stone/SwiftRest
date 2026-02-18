@@ -1,5 +1,43 @@
 # Changelog
 
+## 4.0.0 - 2026-02-18
+
+### Added
+- New chain-first setup API:
+  - `SwiftRest.for(...). ... .client`
+  - `SwiftRestBuilder` with chainable config methods.
+- New chain-first request API:
+  - `client.path(...).get()/post()/put()/patch()/delete()`
+  - terminal output methods:
+    - `.value(...)`
+    - `.response(...)`
+    - `.raw(...)`
+    - `.result(error: ...)`
+    - `.valueAndHeaders(...)`
+- New simplified JSON options:
+  - `SwiftRestJSONDates`
+  - `SwiftRestJSONKeys`
+- New safe refresh context for custom refresh handlers:
+  - `SwiftRestRefreshContext`
+- New beginner-friendly refresh strategy model:
+  - `SwiftRestAuthRefresh.endpoint(...)`
+  - `SwiftRestAuthRefresh.custom(...)`
+  - `SwiftRestAuthRefreshMode`
+  - `SwiftRestAuthRefreshEndpoint`
+- New convenience aliases:
+  - `SwiftRestConfig.default`
+  - `SwiftRestJSONCoding.default`
+  - `SwiftRestDebugLogging.off`
+- New response helpers:
+  - `SwiftRestResponse.value`
+  - `SwiftRestResponse.headerInt(...)`
+  - `SwiftRestResponse.headerDouble(...)`
+
+### Changed
+- Auto refresh now supports safe single-client usage in endpoint and custom modes.
+- Custom refresh uses a bypass context so refresh calls skip normal auth middleware.
+- README fully rewritten around one clean V4 chain style with Swift + SwiftUI examples.
+
 ## 3.4.0 - 2026-02-18
 
 ### Added

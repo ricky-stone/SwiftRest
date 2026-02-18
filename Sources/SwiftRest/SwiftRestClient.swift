@@ -2,6 +2,11 @@ import Foundation
 
 /// A concurrency-safe client for executing async REST requests.
 public actor SwiftRestClient: RestClientType {
+    private enum ExecutionMode: Equatable {
+        case standard
+        case bypassAuthPipeline
+    }
+
     private let baseURL: URL
     private let config: SwiftRestConfig
     private let session: URLSession
@@ -41,93 +46,11 @@ public actor SwiftRestClient: RestClientType {
         _ request: SwiftRestRequest,
         allowHTTPError: Bool = false
     ) async throws -> SwiftRestRawResponse {
-        let policy = effectiveRetryPolicy(for: request)
-
-        var attempt = 1
-        var lastError: SwiftRestClientError?
-        var didAttemptAuthRefresh = false
-        var authOverrideToken: String?
-
-        while attempt <= policy.maxAttempts {
-            do {
-                let requestURL = try buildRequestURL(for: request)
-                let resolvedAuthToken = if let authOverrideToken {
-                    authOverrideToken
-                } else {
-                    try await effectiveAuthToken(for: request)
-                }
-                let urlRequest = buildURLRequest(
-                    for: request,
-                    requestURL: requestURL,
-                    resolvedAuthToken: resolvedAuthToken
-                )
-                logOutgoingRequest(urlRequest, attempt: attempt, maxAttempts: policy.maxAttempts)
-
-                let startTime = Date()
-                let (data, urlResponse) = try await session.data(for: urlRequest)
-                let raw = try processRawResponse(data, urlResponse, startTime)
-                logIncomingResponse(
-                    raw,
-                    method: request.method.rawValue,
-                    requestURL: requestURL,
-                    attempt: attempt,
-                    maxAttempts: policy.maxAttempts
-                )
-
-                if raw.statusCode == 401,
-                   shouldAttemptAuthRefresh(
-                       for: request,
-                       didAttemptAuthRefresh: didAttemptAuthRefresh
-                   ) {
-                    didAttemptAuthRefresh = true
-                    let refreshedToken = try await refreshAccessToken()
-
-                    if let refreshedToken,
-                       refreshedToken != resolvedAuthToken {
-                        authOverrideToken = refreshedToken
-                        logAuthRefresh("Token refreshed after 401. Retrying request once.")
-                        continue
-                    }
-
-                    if let currentToken = try await effectiveAuthToken(for: request),
-                       currentToken != resolvedAuthToken {
-                        authOverrideToken = currentToken
-                        logAuthRefresh("Auth token changed after refresh. Retrying request once.")
-                        continue
-                    }
-
-                    logAuthRefresh("Auth refresh did not produce a new token.")
-                }
-
-                if !allowHTTPError, !raw.isSuccess {
-                    throw SwiftRestClientError.httpError(makeErrorResponse(from: raw))
-                }
-
-                return raw
-            } catch let cancellation as CancellationError {
-                throw cancellation
-            } catch {
-                let normalized = normalize(error)
-                lastError = normalized
-
-                if attempt >= policy.maxAttempts || !shouldRetry(normalized, policy: policy) {
-                    throw normalized
-                }
-
-                let delay = retryDelay(for: attempt, policy: policy, error: normalized)
-                if delay > 0 {
-                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                }
-
-                attempt += 1
-            }
-        }
-
-        if let lastError {
-            throw lastError
-        }
-
-        throw SwiftRestClientError.retryLimitReached
+        try await executeRaw(
+            request,
+            allowHTTPError: allowHTTPError,
+            executionMode: .standard
+        )
     }
 
     /// Executes a request and decodes the response body into `T`.
@@ -931,6 +854,135 @@ public actor SwiftRestClient: RestClientType {
 
     // MARK: - Internal Helpers
 
+    func materialize(
+        baseRequest: SwiftRestRequest,
+        bodyApplier: @Sendable (inout SwiftRestRequest, SwiftRestJSONCoding) throws -> Void
+    ) throws -> SwiftRestRequest {
+        var request = baseRequest
+        let coding = effectiveJSONCoding(for: request)
+        try bodyApplier(&request, coding)
+        return request
+    }
+
+    private func executeRaw(
+        _ request: SwiftRestRequest,
+        allowHTTPError: Bool,
+        executionMode: ExecutionMode
+    ) async throws -> SwiftRestRawResponse {
+        let policy: RetryPolicy = {
+            switch executionMode {
+            case .standard:
+                return effectiveRetryPolicy(for: request)
+            case .bypassAuthPipeline:
+                return .none
+            }
+        }()
+
+        var attempt = 1
+        var lastError: SwiftRestClientError?
+        var didAttemptAuthRefresh = false
+        var authOverrideToken: String?
+
+        while attempt <= policy.maxAttempts {
+            do {
+                let requestURL = try buildRequestURL(for: request)
+                let resolvedAuthToken = try await resolvedAuthToken(
+                    for: request,
+                    executionMode: executionMode,
+                    authOverrideToken: authOverrideToken
+                )
+                let urlRequest = buildURLRequest(
+                    for: request,
+                    requestURL: requestURL,
+                    resolvedAuthToken: resolvedAuthToken
+                )
+                logOutgoingRequest(urlRequest, attempt: attempt, maxAttempts: policy.maxAttempts)
+
+                let startTime = Date()
+                let (data, urlResponse) = try await session.data(for: urlRequest)
+                let raw = try processRawResponse(data, urlResponse, startTime)
+                logIncomingResponse(
+                    raw,
+                    method: request.method.rawValue,
+                    requestURL: requestURL,
+                    attempt: attempt,
+                    maxAttempts: policy.maxAttempts
+                )
+
+                if executionMode == .standard,
+                   raw.statusCode == 401,
+                   shouldAttemptAuthRefresh(
+                       for: request,
+                       didAttemptAuthRefresh: didAttemptAuthRefresh
+                   ) {
+                    didAttemptAuthRefresh = true
+                    let refreshedToken = try await refreshAccessToken(triggeringRequest: request)
+
+                    if let refreshedToken,
+                       refreshedToken != resolvedAuthToken {
+                        authOverrideToken = refreshedToken
+                        logAuthRefresh("Token refreshed after 401. Retrying request once.")
+                        continue
+                    }
+
+                    if let currentToken = try await effectiveAuthToken(for: request),
+                       currentToken != resolvedAuthToken {
+                        authOverrideToken = currentToken
+                        logAuthRefresh("Auth token changed after refresh. Retrying request once.")
+                        continue
+                    }
+
+                    logAuthRefresh("Auth refresh did not produce a new token.")
+                }
+
+                if !allowHTTPError, !raw.isSuccess {
+                    throw SwiftRestClientError.httpError(makeErrorResponse(from: raw))
+                }
+
+                return raw
+            } catch let cancellation as CancellationError {
+                throw cancellation
+            } catch {
+                let normalized = normalize(error)
+                lastError = normalized
+
+                if attempt >= policy.maxAttempts || !shouldRetry(normalized, policy: policy) {
+                    throw normalized
+                }
+
+                let delay = retryDelay(for: attempt, policy: policy, error: normalized)
+                if delay > 0 {
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                }
+
+                attempt += 1
+            }
+        }
+
+        if let lastError {
+            throw lastError
+        }
+
+        throw SwiftRestClientError.retryLimitReached
+    }
+
+    private func resolvedAuthToken(
+        for request: SwiftRestRequest,
+        executionMode: ExecutionMode,
+        authOverrideToken: String?
+    ) async throws -> String? {
+        if let authOverrideToken {
+            return authOverrideToken
+        }
+
+        switch executionMode {
+        case .standard:
+            return try await effectiveAuthToken(for: request)
+        case .bypassAuthPipeline:
+            return normalizedToken(request.authToken)
+        }
+    }
+
     private func effectiveRetryPolicy(for request: SwiftRestRequest) -> RetryPolicy {
         request.retryPolicy ?? config.retryPolicy
     }
@@ -1109,7 +1161,7 @@ public actor SwiftRestClient: RestClientType {
         return normalizedToken(accessToken) != nil || accessTokenProvider != nil
     }
 
-    private func refreshAccessToken() async throws -> String? {
+    private func refreshAccessToken(triggeringRequest: SwiftRestRequest) async throws -> String? {
         guard authRefresh.isEnabled else {
             return nil
         }
@@ -1120,7 +1172,10 @@ public actor SwiftRestClient: RestClientType {
 
         let refresh = authRefresh
         let task = Task<String?, Error> {
-            try await refresh.refreshToken()
+            try await self.resolveRefreshedToken(
+                refresh,
+                triggeringRequest: triggeringRequest
+            )
         }
 
         authRefreshTask = task
@@ -1138,6 +1193,90 @@ public actor SwiftRestClient: RestClientType {
         } catch {
             throw SwiftRestClientError.authRefreshFailed(underlying: ErrorContext(error))
         }
+    }
+
+    private func resolveRefreshedToken(
+        _ refresh: SwiftRestAuthRefresh,
+        triggeringRequest: SwiftRestRequest
+    ) async throws -> String? {
+        switch refresh.mode {
+        case .disabled:
+            return nil
+        case .endpoint(let endpointConfig):
+            return try await refreshViaEndpoint(endpointConfig)
+        case .custom(let handler):
+            let context = makeRefreshContext(for: triggeringRequest)
+            return try await handler(context)
+        }
+    }
+
+    private func refreshViaEndpoint(
+        _ endpointConfig: SwiftRestAuthRefreshEndpoint
+    ) async throws -> String? {
+        guard let refreshToken = normalizedToken(try await endpointConfig.refreshTokenProvider()) else {
+            throw SwiftRestClientError.authRefreshFailed(
+                underlying: ErrorContext(description: "Refresh token provider returned no value.")
+            )
+        }
+
+        var request = SwiftRestRequest(
+            path: endpointConfig.endpoint,
+            method: endpointConfig.method
+        )
+        request.addHeaders(endpointConfig.headers)
+
+        let payload = [endpointConfig.refreshTokenField: refreshToken]
+        try request.addJsonBody(payload, using: config.jsonCoding.makeEncoder())
+
+        let raw = try await executeRaw(
+            request,
+            allowHTTPError: true,
+            executionMode: .bypassAuthPipeline
+        )
+
+        guard raw.isSuccess else {
+            throw SwiftRestClientError.httpError(makeErrorResponse(from: raw))
+        }
+
+        do {
+            guard
+                let object = try raw.jsonObject() as? [String: Any],
+                let token = object[endpointConfig.tokenField] as? String
+            else {
+                throw SwiftRestClientError.authRefreshFailed(
+                    underlying: ErrorContext(
+                        description: "Refresh response missing token field \"\(endpointConfig.tokenField)\"."
+                    )
+                )
+            }
+
+            return normalizedToken(token)
+        } catch let error as SwiftRestClientError {
+            throw error
+        } catch {
+            throw SwiftRestClientError.authRefreshFailed(underlying: ErrorContext(error))
+        }
+    }
+
+    private func makeRefreshContext(
+        for triggeringRequest: SwiftRestRequest
+    ) -> SwiftRestRefreshContext {
+        let baseJSONCoding = effectiveJSONCoding(for: triggeringRequest)
+        return SwiftRestRefreshContext(
+            jsonCoding: baseJSONCoding,
+            performRaw: { [weak self] request in
+                guard let self else {
+                    throw SwiftRestClientError.authRefreshFailed(
+                        underlying: ErrorContext(description: "Refresh context was released.")
+                    )
+                }
+                return try await self.executeRaw(
+                    request,
+                    allowHTTPError: true,
+                    executionMode: .bypassAuthPipeline
+                )
+            }
+        )
     }
 
     private func normalizedToken(_ token: String?) -> String? {
