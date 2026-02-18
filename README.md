@@ -185,9 +185,9 @@ let client = try SwiftRest
 
 Auto refresh is built-in and safe for single-client usage.
 
-- On `401`, SwiftRest refreshes once and retries the original request once.
+- On configured auth status codes (default: `401`), SwiftRest refreshes once and retries once.
 - Refresh calls bypass normal auth middleware to avoid recursion.
-- Concurrent `401` requests share one refresh (single-flight).
+- Concurrent auth-failure requests share one refresh (single-flight).
 
 ### Beginner mode (endpoint-driven)
 
@@ -229,6 +229,7 @@ let client = try SwiftRest
         refreshTokenField: "refreshToken",
         tokenField: "accessToken",
         refreshTokenResponseField: "refreshToken",
+        triggerStatusCodes: [401],
         onTokensRefreshed: { accessToken, refreshToken in
             await sessionStore.setTokens(accessToken: accessToken, refreshToken: refreshToken)
         }
@@ -250,6 +251,7 @@ What each setting does:
 - `refreshTokenField`: JSON key sent to refresh endpoint in request body.
 - `tokenField`: JSON key read from refresh response for the new access token.
 - `refreshTokenResponseField`: optional key read from refresh response for rotated refresh token.
+- `triggerStatusCodes`: status codes that should trigger refresh (default is `[401]`).
 - `onTokensRefreshed`: callback to save refreshed token values to your store/keychain.
 
 Example refresh response:
@@ -284,7 +286,8 @@ If your API uses different names, set exact key names:
     refreshTokenProvider: { await sessionStore.refreshToken },
     refreshTokenField: "refresh_token",
     tokenField: "token",
-    refreshTokenResponseField: "refresh_token"
+    refreshTokenResponseField: "refresh_token",
+    triggerStatusCodes: [401, 403]
 )
 ```
 
@@ -306,7 +309,7 @@ let refresh = SwiftRestAuthRefresh.custom { refresh in
     )
     await sessionStore.setAccessToken(dto.accessToken)
     return dto.accessToken
-}
+}.triggerStatusCodes([401, 403])
 
 let client = try SwiftRest
     .for("https://api.example.com")
@@ -326,7 +329,7 @@ do {
     case .authRefreshFailed:
         await sessionStore.clear()
         // Route user to login screen
-    case .httpError(let details) where details.statusCode == 401:
+    case .httpError(let details) where [401, 403].contains(details.statusCode):
         await sessionStore.clear()
         // Route user to login screen
     default:
@@ -358,7 +361,7 @@ let publicInfo: PublicInfo = try await client
 ```swift
 let raw = try await client
     .path("secure/profile")
-    .autoRefresh(false) // skip 401 refresh for this call
+    .autoRefresh(false) // skip auth refresh for this call
     .get()
     .raw()
 
@@ -674,4 +677,4 @@ Thanks to everyone who tests, reports issues, and contributes improvements.
 
 ## Version
 
-Current source version marker: `SwiftRestVersion.current == "4.3.0"`
+Current source version marker: `SwiftRestVersion.current == "4.4.0"`

@@ -51,6 +51,7 @@ public struct SwiftRestBuilder: Sendable {
         tokenField: String = "accessToken",
         refreshTokenResponseField: String? = nil,
         onTokensRefreshed: SwiftRestTokensRefreshedHandler? = nil,
+        triggerStatusCodes: Set<Int> = [401],
         headers: [String: String] = [:]
     ) -> Self {
         autoRefresh(
@@ -62,6 +63,7 @@ public struct SwiftRestBuilder: Sendable {
                 tokenField: tokenField,
                 refreshTokenResponseField: refreshTokenResponseField,
                 onTokensRefreshed: onTokensRefreshed,
+                triggerStatusCodes: triggerStatusCodes,
                 headers: headers
             )
         )

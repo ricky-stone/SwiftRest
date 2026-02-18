@@ -910,9 +910,9 @@ public actor SwiftRestClient: RestClientType {
                 )
 
                 if executionMode == .standard,
-                   raw.statusCode == 401,
                    shouldAttemptAuthRefresh(
                        for: request,
+                       statusCode: raw.statusCode,
                        didAttemptAuthRefresh: didAttemptAuthRefresh
                    ) {
                     didAttemptAuthRefresh = true
@@ -921,7 +921,7 @@ public actor SwiftRestClient: RestClientType {
                     if let refreshedToken,
                        refreshedToken != resolvedAuthToken {
                         authOverrideToken = refreshedToken
-                        logAuthRefresh("Token refreshed after 401. Retrying request once.")
+                        logAuthRefresh("Token refreshed after \(raw.statusCode). Retrying request once.")
                         continue
                     }
 
@@ -1147,6 +1147,7 @@ public actor SwiftRestClient: RestClientType {
 
     private func shouldAttemptAuthRefresh(
         for request: SwiftRestRequest,
+        statusCode: Int,
         didAttemptAuthRefresh: Bool
     ) -> Bool {
         if request.noAuth {
@@ -1158,6 +1159,10 @@ public actor SwiftRestClient: RestClientType {
         }
 
         guard authRefresh.isEnabled, !didAttemptAuthRefresh else {
+            return false
+        }
+
+        guard authRefresh.triggerStatusCodes.contains(statusCode) else {
             return false
         }
 

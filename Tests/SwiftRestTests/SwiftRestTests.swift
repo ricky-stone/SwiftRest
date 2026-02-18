@@ -225,6 +225,46 @@ private final class RefreshAuthURLProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
+private final class RefreshForbiddenAuthURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+
+        let authorization = request.value(forHTTPHeaderField: "Authorization") ?? "none"
+        let isFresh = authorization == "Bearer fresh-token"
+        let statusCode = isFresh ? 200 : 403
+        let body = isFresh
+            ? #"{"id":1,"name":"Alice"}"#
+            : #"{"message":"Forbidden","code":"forbidden"}"#
+
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: statusCode,
+            httpVersion: nil,
+            headerFields: [
+                "Content-Type": "application/json",
+                "X-Observed-Authorization": authorization
+            ]
+        )!
+
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
 private final class EndpointRefreshState: @unchecked Sendable {
     static let shared = EndpointRefreshState()
 
@@ -284,6 +324,53 @@ private final class EndpointRefreshURLProtocol: URLProtocol, @unchecked Sendable
             respond(url: url, statusCode: 200, body: #"{"id":1,"name":"Alice"}"#)
         } else {
             respond(url: url, statusCode: 401, body: #"{"message":"Unauthorized"}"#)
+        }
+    }
+
+    override func stopLoading() {}
+
+    private func respond(url: URL, statusCode: Int, body: String) {
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: statusCode,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        )!
+
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
+private final class EndpointRefreshForbiddenURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+
+        if url.path == "/auth/refresh" {
+            let auth = request.value(forHTTPHeaderField: "Authorization") ?? "none"
+            let bodyText = requestBodyText(request)
+            EndpointRefreshState.shared.record(authHeader: auth, body: bodyText)
+            respond(url: url, statusCode: 200, body: #"{"accessToken":"fresh-token"}"#)
+            return
+        }
+
+        let authorization = request.value(forHTTPHeaderField: "Authorization") ?? "none"
+        if authorization == "Bearer fresh-token" {
+            respond(url: url, statusCode: 200, body: #"{"id":1,"name":"Alice"}"#)
+        } else {
+            respond(url: url, statusCode: 403, body: #"{"message":"Forbidden"}"#)
         }
     }
 
@@ -475,6 +562,13 @@ private func makeRefreshAuthClient(config: SwiftRestConfig = .standard) throws -
     return try SwiftRestClient("https://api.example.com", config: config, session: session)
 }
 
+private func makeRefreshForbiddenAuthClient(config: SwiftRestConfig = .standard) throws -> SwiftRestClient {
+    let sessionConfiguration = URLSessionConfiguration.ephemeral
+    sessionConfiguration.protocolClasses = [RefreshForbiddenAuthURLProtocol.self]
+    let session = URLSession(configuration: sessionConfiguration)
+    return try SwiftRestClient("https://api.example.com", config: config, session: session)
+}
+
 private func makeResultScenarioClient(config: SwiftRestConfig = .standard) throws -> SwiftRestClient {
     let sessionConfiguration = URLSessionConfiguration.ephemeral
     sessionConfiguration.protocolClasses = [ResultScenarioURLProtocol.self]
@@ -485,6 +579,12 @@ private func makeResultScenarioClient(config: SwiftRestConfig = .standard) throw
 private func makeEndpointRefreshSession() -> URLSession {
     let sessionConfiguration = URLSessionConfiguration.ephemeral
     sessionConfiguration.protocolClasses = [EndpointRefreshURLProtocol.self]
+    return URLSession(configuration: sessionConfiguration)
+}
+
+private func makeEndpointRefreshForbiddenSession() -> URLSession {
+    let sessionConfiguration = URLSessionConfiguration.ephemeral
+    sessionConfiguration.protocolClasses = [EndpointRefreshForbiddenURLProtocol.self]
     return URLSession(configuration: sessionConfiguration)
 }
 
@@ -872,6 +972,24 @@ private actor RefreshedTokensSink {
     #expect(snapshot.refreshAuthHeaders.allSatisfy { $0 == "none" })
 }
 
+@Test func testV4EndpointAutoRefreshCanTriggerOnConfigured403() async throws {
+    let session = makeEndpointRefreshForbiddenSession()
+
+    let client = try SwiftRest
+        .for("https://api.example.com")
+        .accessToken("expired-token")
+        .autoRefresh(
+            endpoint: "auth/refresh",
+            refreshTokenProvider: { "refresh-1" },
+            triggerStatusCodes: [403]
+        )
+        .session(session)
+        .client
+
+    let user: Dummy = try await client.path("secure/profile").get().value()
+    #expect(user == Dummy(id: 1, name: "Alice"))
+}
+
 @Test func testV4EndpointAutoRefreshOnTokensRefreshedCallback() async throws {
     let session = makeEndpointRefreshSession()
     let sink = RefreshedTokensSink()
@@ -1029,6 +1147,51 @@ private actor RefreshedTokensSink {
     )
     #expect(raw.statusCode == 401)
     #expect(await refreshCounter.current() == 0)
+}
+
+@Test func testAuthRefreshCanTriggerOnConfigured403Status() async throws {
+    let refreshCounter = AsyncCounter()
+    let refresh = SwiftRestAuthRefresh.custom { _ in
+        await refreshCounter.increment()
+        return "fresh-token"
+    }.triggerStatusCodes([403])
+
+    let client = try makeRefreshForbiddenAuthClient(
+        config: .standard
+            .accessToken("expired-token")
+            .authRefresh(refresh)
+    )
+
+    let raw = try await client.getRaw("secure/profile")
+    #expect(raw.statusCode == 200)
+    #expect(raw.header("x-observed-authorization") == "Bearer fresh-token")
+    #expect(await refreshCounter.current() == 1)
+}
+
+@Test func testAuthRefreshDoesNotTriggerOn403ByDefault() async throws {
+    let refreshCounter = AsyncCounter()
+    let refresh = SwiftRestAuthRefresh.custom { _ in
+        await refreshCounter.increment()
+        return "fresh-token"
+    }
+
+    let client = try makeRefreshForbiddenAuthClient(
+        config: .standard
+            .accessToken("expired-token")
+            .authRefresh(refresh)
+    )
+
+    let raw = try await client.getRaw("secure/profile", allowHTTPError: true)
+    #expect(raw.statusCode == 403)
+    #expect(await refreshCounter.current() == 0)
+}
+
+@Test func testAuthRefreshTriggerStatusCodeNormalization() {
+    let refresh = SwiftRestAuthRefresh.custom({ _ in "fresh-token" }, triggerStatusCodes: [0, 700])
+    #expect(refresh.triggerStatusCodes == Set([401]))
+
+    let updated = refresh.triggerStatusCodes([401, 403, 700])
+    #expect(updated.triggerStatusCodes == Set([401, 403]))
 }
 
 @Test func testAuthRefreshCanBeDisabledPerRequest() async throws {
@@ -1235,7 +1398,7 @@ private actor RefreshedTokensSink {
     )
     #expect(SwiftRestConfig.standard.debugLogging.isEnabled == false)
     #expect(SwiftRestConfig.standard.authRefresh.isEnabled == false)
-    #expect(SwiftRestVersion.current == "4.3.0")
+    #expect(SwiftRestVersion.current == "4.4.0")
 
     _ = try SwiftRestClient("https://api.example.com")
 }

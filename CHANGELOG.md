@@ -1,5 +1,21 @@
 # Changelog
 
+## 4.4.0 - 2026-02-18
+
+### Added
+- Configurable auth-refresh trigger status codes.
+  - Default remains `[401]`.
+  - Supports API-specific auth flows like `[401, 403]`.
+- New endpoint builder parameter:
+  - `triggerStatusCodes` in `.autoRefresh(endpoint:...)`.
+- New `SwiftRestAuthRefresh` customization:
+  - `.triggerStatusCodes(...)`.
+- New tests for custom trigger code behavior and defaults.
+
+### Changed
+- Auth refresh execution now checks configured trigger status codes instead of hard-coded `401`.
+- README refresh docs now explain trigger status code customization with beginner examples.
+
 ## 4.3.0 - 2026-02-18
 
 ### Added

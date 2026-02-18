@@ -53,7 +53,8 @@ public enum SwiftRestAuthRefreshMode: Sendable {
     case custom(SwiftRestCustomRefreshHandler)
 }
 
-/// Configuration for automatic auth refresh (`401` -> refresh token -> retry once).
+/// Configuration for automatic auth refresh
+/// (default `401` -> refresh token -> retry once).
 public struct SwiftRestAuthRefresh: Sendable {
     /// Refresh strategy.
     public var mode: SwiftRestAuthRefreshMode
@@ -63,18 +64,26 @@ public struct SwiftRestAuthRefresh: Sendable {
     /// Default is `false` so one-off request tokens stay isolated.
     public var appliesToPerRequestToken: Bool
 
+    /// HTTP status codes that trigger auth refresh.
+    ///
+    /// Default: `[401]`.
+    public var triggerStatusCodes: Set<Int>
+
     public init(
         mode: SwiftRestAuthRefreshMode,
-        appliesToPerRequestToken: Bool = false
+        appliesToPerRequestToken: Bool = false,
+        triggerStatusCodes: Set<Int> = [401]
     ) {
         self.mode = mode
         self.appliesToPerRequestToken = appliesToPerRequestToken
+        self.triggerStatusCodes = Self.normalizedTriggerStatusCodes(triggerStatusCodes)
     }
 
     /// Disabled refresh behavior.
     public static let disabled = SwiftRestAuthRefresh(
         mode: .disabled,
-        appliesToPerRequestToken: false
+        appliesToPerRequestToken: false,
+        triggerStatusCodes: [401]
     )
 
     /// Beginner-friendly endpoint mode.
@@ -86,6 +95,7 @@ public struct SwiftRestAuthRefresh: Sendable {
         tokenField: String = "accessToken",
         refreshTokenResponseField: String? = nil,
         onTokensRefreshed: SwiftRestTokensRefreshedHandler? = nil,
+        triggerStatusCodes: Set<Int> = [401],
         headers: [String: String] = [:]
     ) -> Self {
         SwiftRestAuthRefresh(
@@ -100,16 +110,19 @@ public struct SwiftRestAuthRefresh: Sendable {
                     onTokensRefreshed: onTokensRefreshed,
                     headers: headers
                 )
-            )
+            ),
+            triggerStatusCodes: triggerStatusCodes
         )
     }
 
     /// Advanced custom mode.
     public static func custom(
-        _ handler: @escaping SwiftRestCustomRefreshHandler
+        _ handler: @escaping SwiftRestCustomRefreshHandler,
+        triggerStatusCodes: Set<Int> = [401]
     ) -> Self {
         SwiftRestAuthRefresh(
-            mode: .custom(handler)
+            mode: .custom(handler),
+            triggerStatusCodes: triggerStatusCodes
         )
     }
 
@@ -119,6 +132,16 @@ public struct SwiftRestAuthRefresh: Sendable {
         return copy
     }
 
+    public func triggerStatusCodes(_ statusCodes: Set<Int>) -> Self {
+        var copy = self
+        copy.triggerStatusCodes = Self.normalizedTriggerStatusCodes(statusCodes)
+        return copy
+    }
+
+    public func triggerStatusCodes(_ statusCodes: [Int]) -> Self {
+        triggerStatusCodes(Set(statusCodes))
+    }
+
     public var isEnabled: Bool {
         switch mode {
         case .disabled:
@@ -126,5 +149,10 @@ public struct SwiftRestAuthRefresh: Sendable {
         case .endpoint, .custom:
             return true
         }
+    }
+
+    private static func normalizedTriggerStatusCodes(_ statusCodes: Set<Int>) -> Set<Int> {
+        let valid = statusCodes.filter { (100...599).contains($0) }
+        return valid.isEmpty ? [401] : valid
     }
 }
