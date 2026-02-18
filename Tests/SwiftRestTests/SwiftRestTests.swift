@@ -240,7 +240,7 @@ private final class EndpointRefreshURLProtocol: URLProtocol, @unchecked Sendable
 
         if url.path == "/auth/refresh" {
             let auth = request.value(forHTTPHeaderField: "Authorization") ?? "none"
-            let bodyText = String(data: request.httpBody ?? Data(), encoding: .utf8) ?? ""
+            let bodyText = requestBodyText(request)
             EndpointRefreshState.shared.record(authHeader: auth, body: bodyText)
             respond(url: url, statusCode: 200, body: #"{"accessToken":"fresh-token"}"#)
             return
@@ -268,6 +268,35 @@ private final class EndpointRefreshURLProtocol: URLProtocol, @unchecked Sendable
         client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
+}
+
+private func requestBodyText(_ request: URLRequest) -> String {
+    if let body = request.httpBody,
+       !body.isEmpty {
+        return String(data: body, encoding: .utf8) ?? ""
+    }
+
+    guard let stream = request.httpBodyStream else {
+        return ""
+    }
+
+    stream.open()
+    defer { stream.close() }
+
+    var data = Data()
+    let bufferSize = 1024
+    let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+    defer { buffer.deallocate() }
+
+    while stream.hasBytesAvailable {
+        let readCount = stream.read(buffer, maxLength: bufferSize)
+        if readCount <= 0 {
+            break
+        }
+        data.append(buffer, count: readCount)
+    }
+
+    return String(data: data, encoding: .utf8) ?? ""
 }
 
 private final class ResultScenarioURLProtocol: URLProtocol, @unchecked Sendable {
@@ -606,6 +635,25 @@ private actor AsyncCounter {
     #expect(raw.header("x-observed-authorization") == "Bearer provider-token")
 }
 
+@Test func testRequestNoAuthOverridesTokenSources() async throws {
+    let client = try makeAuthEchoClient(
+        config: .standard
+            .accessToken("global-token")
+            .accessTokenProvider({ "provider-token" })
+    )
+
+    let noAuthRaw = try await client.path("users/1").noAuth().get().raw()
+    #expect(noAuthRaw.header("x-observed-authorization") == "none")
+
+    let requestTokenNoAuthRaw = try await client
+        .path("users/1")
+        .authToken("request-token")
+        .noAuth()
+        .get()
+        .raw()
+    #expect(requestTokenNoAuthRaw.header("x-observed-authorization") == "none")
+}
+
 @Test func testV4ChainBuilderAndRequestOutputs() async throws {
     let sessionConfiguration = URLSessionConfiguration.ephemeral
     sessionConfiguration.protocolClasses = [ResultScenarioURLProtocol.self]
@@ -675,6 +723,32 @@ private actor AsyncCounter {
     let snapshot = EndpointRefreshState.shared.snapshot()
     #expect(snapshot.refreshCalls >= 1)
     #expect(snapshot.refreshAuthHeaders.allSatisfy { $0 == "none" })
+}
+
+@Test func testV4RequestRefreshTokenProviderOverridesEndpointProvider() async throws {
+    let session = makeEndpointRefreshSession()
+    EndpointRefreshState.shared.reset()
+
+    let client = try SwiftRest
+        .for("https://api.example.com")
+        .accessToken("expired-token")
+        .autoRefresh(
+            endpoint: "auth/refresh",
+            refreshTokenProvider: { "refresh-global" }
+        )
+        .session(session)
+        .client
+
+    let user: Dummy = try await client
+        .path("secure/profile")
+        .refreshTokenProvider { "refresh-request" }
+        .get()
+        .value()
+    #expect(user == Dummy(id: 1, name: "Alice"))
+
+    let snapshot = EndpointRefreshState.shared.snapshot()
+    #expect(snapshot.refreshCalls >= 1)
+    #expect(snapshot.refreshBodies.contains { $0.contains(#""refreshToken":"refresh-request""#) })
 }
 
 @Test func testV4CustomAutoRefreshBypassContext() async throws {
@@ -754,6 +828,28 @@ private actor AsyncCounter {
         authToken: "expired-token",
         allowHTTPError: true
     )
+    #expect(raw.statusCode == 401)
+    #expect(await refreshCounter.current() == 0)
+}
+
+@Test func testAuthRefreshCanBeDisabledPerRequest() async throws {
+    let refreshCounter = AsyncCounter()
+    let refresh = SwiftRestAuthRefresh.custom { _ in
+        await refreshCounter.increment()
+        return "fresh-token"
+    }
+
+    let client = try makeRefreshAuthClient(
+        config: .standard
+            .accessToken("expired-token")
+            .authRefresh(refresh)
+    )
+
+    let raw = try await client
+        .path("secure/profile")
+        .autoRefresh(false)
+        .get()
+        .raw()
     #expect(raw.statusCode == 401)
     #expect(await refreshCounter.current() == 0)
 }
@@ -940,7 +1036,7 @@ private actor AsyncCounter {
     )
     #expect(SwiftRestConfig.standard.debugLogging.isEnabled == false)
     #expect(SwiftRestConfig.standard.authRefresh.isEnabled == false)
-    #expect(SwiftRestVersion.current == "4.0.0")
+    #expect(SwiftRestVersion.current == "4.1.0")
 
     _ = try SwiftRestClient("https://api.example.com")
 }

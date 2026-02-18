@@ -59,6 +59,26 @@ public struct SwiftRestPathBuilder: Sendable {
         return copy
     }
 
+    public func noAuth(_ disabled: Bool = true) -> Self {
+        var copy = self
+        copy.request = copy.request.noAuth(disabled)
+        return copy
+    }
+
+    public func autoRefresh(_ enabled: Bool) -> Self {
+        var copy = self
+        copy.request.configureAutoRefresh(enabled)
+        return copy
+    }
+
+    public func refreshTokenProvider(
+        _ provider: @escaping SwiftRestRefreshTokenProvider
+    ) -> Self {
+        var copy = self
+        copy.request.configureRefreshTokenProvider(provider)
+        return copy
+    }
+
     public func retry(_ policy: RetryPolicy) -> Self {
         var copy = self
         copy.request.configureRetryPolicy(policy)

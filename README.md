@@ -25,6 +25,23 @@ Use Swift Package Manager with:
 
 - `https://github.com/ricky-stone/SwiftRest.git`
 
+## Default Client Behavior
+
+This is the minimum setup:
+
+```swift
+let client = try SwiftRest.for("https://api.example.com").client
+```
+
+Defaults used by this client:
+
+- `Accept: application/json`
+- `timeout = 30` seconds
+- `retry = .standard` (3 attempts total)
+- `json = .default` (Foundation key/date behavior)
+- `logging = .off`
+- no access token, no auto refresh
+
 ## Community
 
 - Questions and ideas: [GitHub Discussions](https://github.com/ricky-stone/SwiftRest/discussions)
@@ -111,12 +128,14 @@ let result: SwiftRestResult<User, APIErrorModel> =
 ### Swift
 
 ```swift
-let response: SwiftRestResponse<User> = try await client.path("users/1").get().response()
+let result = try await client
+    .path("users/1")
+    .get()
+    .valueAndHeaders(as: User.self)
 
-print(response.statusCode)
-print(response.value?.firstName ?? "none")
-print(response.header("x-request-id") ?? "missing")
-print(response.headerInt("x-rate-limit-remaining") ?? 0)
+print(result.value.firstName)
+print(result.headers["x-request-id"] ?? "missing")
+print(result.headers["x-rate-limit-remaining"] ?? "0")
 ```
 
 ### SwiftUI
@@ -131,9 +150,12 @@ final class ProfileViewModel: ObservableObject {
 
     func load() async {
         do {
-            let response: SwiftRestResponse<User> = try await client.path("users/1").get().response()
-            name = response.value?.firstName ?? ""
-            requestId = response.header("x-request-id") ?? ""
+            let result = try await client
+                .path("users/1")
+                .get()
+                .valueAndHeaders(as: User.self)
+            name = result.value.firstName
+            requestId = result.headers["x-request-id"] ?? ""
         } catch {
             name = ""
             requestId = ""
@@ -223,6 +245,46 @@ let client = try SwiftRest
     .autoRefresh(refresh)
     .client
 ```
+
+## Per-Request Auth Overrides
+
+Use these when one call needs different auth behavior.
+
+```swift
+let user: User = try await client
+    .path("users/1")
+    .authToken("one-off-token") // per-request access token
+    .get()
+    .value()
+```
+
+```swift
+let publicInfo: PublicInfo = try await client
+    .path("public/info")
+    .noAuth() // skips Authorization header for this call
+    .get()
+    .value()
+```
+
+```swift
+let raw = try await client
+    .path("secure/profile")
+    .autoRefresh(false) // skip 401 refresh for this call
+    .get()
+    .raw()
+
+print(raw.statusCode)
+```
+
+```swift
+let user: User = try await client
+    .path("secure/profile")
+    .refreshTokenProvider { await sessionStore.temporaryRefreshToken }
+    .get()
+    .value()
+```
+
+`refreshTokenProvider` above is only used if that call hits `401` and refresh is enabled on the client.
 
 ## Query and Body Models
 
@@ -392,4 +454,4 @@ Thanks to everyone who tests, reports issues, and contributes improvements.
 
 ## Version
 
-Current source version marker: `SwiftRestVersion.current == "4.0.0"`
+Current source version marker: `SwiftRestVersion.current == "4.1.0"`

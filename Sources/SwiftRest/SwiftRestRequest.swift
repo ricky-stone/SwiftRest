@@ -8,6 +8,9 @@ public struct SwiftRestRequest: Sendable {
     public private(set) var parameters: [String: String]
     public private(set) var body: Data?
     public private(set) var authToken: String?
+    public private(set) var noAuth: Bool
+    public private(set) var autoRefreshEnabled: Bool?
+    public private(set) var refreshTokenProvider: SwiftRestRefreshTokenProvider?
     public private(set) var retryPolicy: RetryPolicy?
     public private(set) var jsonCoding: SwiftRestJSONCoding?
 
@@ -18,6 +21,9 @@ public struct SwiftRestRequest: Sendable {
         self.parameters = [:]
         self.body = nil
         self.authToken = nil
+        self.noAuth = false
+        self.autoRefreshEnabled = nil
+        self.refreshTokenProvider = nil
         self.retryPolicy = nil
         self.jsonCoding = nil
     }
@@ -85,6 +91,20 @@ public struct SwiftRestRequest: Sendable {
 
     public mutating func addAuthToken(_ token: String) {
         self.authToken = token
+    }
+
+    public mutating func disableAuth() {
+        self.noAuth = true
+    }
+
+    public mutating func configureAutoRefresh(_ enabled: Bool) {
+        self.autoRefreshEnabled = enabled
+    }
+
+    public mutating func configureRefreshTokenProvider(
+        _ provider: @escaping SwiftRestRefreshTokenProvider
+    ) {
+        self.refreshTokenProvider = provider
     }
 
     /// Backward-compatible retry configuration.
@@ -200,6 +220,30 @@ public struct SwiftRestRequest: Sendable {
     public func authToken(_ token: String) -> Self {
         var copy = self
         copy.addAuthToken(token)
+        return copy
+    }
+
+    public func noAuth(_ disabled: Bool = true) -> Self {
+        var copy = self
+        if disabled {
+            copy.disableAuth()
+        } else {
+            copy.noAuth = false
+        }
+        return copy
+    }
+
+    public func autoRefresh(_ enabled: Bool) -> Self {
+        var copy = self
+        copy.configureAutoRefresh(enabled)
+        return copy
+    }
+
+    public func refreshTokenProvider(
+        _ provider: @escaping SwiftRestRefreshTokenProvider
+    ) -> Self {
+        var copy = self
+        copy.configureRefreshTokenProvider(provider)
         return copy
     }
 

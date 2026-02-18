@@ -1,5 +1,22 @@
 # Changelog
 
+## 4.1.0 - 2026-02-18
+
+### Added
+- Per-request auth override controls in the V4 request chain:
+  - `.noAuth()` to skip `Authorization` on a single call.
+  - `.autoRefresh(false)` to disable 401 refresh on a single call.
+  - `.refreshTokenProvider { ... }` to override refresh token lookup for a single call.
+- New tests covering per-request auth override behavior.
+
+### Changed
+- Endpoint auto refresh now honors per-request `refreshTokenProvider` overrides.
+- Auth pipeline now respects per-request `.noAuth()` and `.autoRefresh(false)` in refresh decisions.
+- README expanded with:
+  - default client behavior section
+  - beginner-friendly headers access example using `valueAndHeaders(...)`
+  - per-request auth override examples
+
 ## 4.0.0 - 2026-02-18
 
 ### Added

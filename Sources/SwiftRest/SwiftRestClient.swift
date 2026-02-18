@@ -1129,6 +1129,10 @@ public actor SwiftRestClient: RestClientType {
     }
 
     private func effectiveAuthToken(for request: SwiftRestRequest) async throws -> String? {
+        if request.noAuth {
+            return nil
+        }
+
         if let token = normalizedToken(request.authToken) {
             return token
         }
@@ -1145,6 +1149,14 @@ public actor SwiftRestClient: RestClientType {
         for request: SwiftRestRequest,
         didAttemptAuthRefresh: Bool
     ) -> Bool {
+        if request.noAuth {
+            return false
+        }
+
+        if request.autoRefreshEnabled == false {
+            return false
+        }
+
         guard authRefresh.isEnabled, !didAttemptAuthRefresh else {
             return false
         }
@@ -1203,7 +1215,10 @@ public actor SwiftRestClient: RestClientType {
         case .disabled:
             return nil
         case .endpoint(let endpointConfig):
-            return try await refreshViaEndpoint(endpointConfig)
+            return try await refreshViaEndpoint(
+                endpointConfig,
+                triggeringRequest: triggeringRequest
+            )
         case .custom(let handler):
             let context = makeRefreshContext(for: triggeringRequest)
             return try await handler(context)
@@ -1211,9 +1226,11 @@ public actor SwiftRestClient: RestClientType {
     }
 
     private func refreshViaEndpoint(
-        _ endpointConfig: SwiftRestAuthRefreshEndpoint
+        _ endpointConfig: SwiftRestAuthRefreshEndpoint,
+        triggeringRequest: SwiftRestRequest
     ) async throws -> String? {
-        guard let refreshToken = normalizedToken(try await endpointConfig.refreshTokenProvider()) else {
+        let refreshTokenProvider = triggeringRequest.refreshTokenProvider ?? endpointConfig.refreshTokenProvider
+        guard let refreshToken = normalizedToken(try await refreshTokenProvider()) else {
             throw SwiftRestClientError.authRefreshFailed(
                 underlying: ErrorContext(description: "Refresh token provider returned no value.")
             )
