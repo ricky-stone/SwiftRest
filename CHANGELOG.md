@@ -1,5 +1,17 @@
 # Changelog
 
+## 4.6.0 - 2026-02-18
+
+### Added
+- New V4 terminal request method:
+  - `SwiftRestPreparedRequest.send()`
+  - For success/failure-only calls (no response model required)
+- New tests for `send()` success and failure behavior.
+
+### Changed
+- README now documents `send()` in core request flow.
+- README includes beginner-friendly no-response examples including logout.
+
 ## 4.5.0 - 2026-02-18
 
 ### Changed

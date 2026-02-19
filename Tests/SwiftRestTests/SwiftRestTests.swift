@@ -923,6 +923,33 @@ private actor RefreshedTokensSink {
     }
 }
 
+@Test func testV4ChainSendForNoResponseFlows() async throws {
+    let sessionConfiguration = URLSessionConfiguration.ephemeral
+    sessionConfiguration.protocolClasses = [ResultScenarioURLProtocol.self]
+    let session = URLSession(configuration: sessionConfiguration)
+
+    let client = try SwiftRest
+        .for("https://api.example.com")
+        .session(session)
+        .client
+
+    try await client.path("result-success").get().send()
+
+    do {
+        try await client.path("result-api-error").get().send()
+        #expect(Bool(false))
+    } catch let error as SwiftRestClientError {
+        switch error {
+        case .httpError(let response):
+            #expect(response.statusCode == 422)
+        default:
+            #expect(Bool(false))
+        }
+    } catch {
+        #expect(Bool(false))
+    }
+}
+
 @Test func testV4ChainSupportsHeadAndOptionsMethods() async throws {
     let client = try makeMethodEchoClient()
 
@@ -1398,7 +1425,7 @@ private actor RefreshedTokensSink {
     )
     #expect(SwiftRestConfig.standard.debugLogging.isEnabled == false)
     #expect(SwiftRestConfig.standard.authRefresh.isEnabled == false)
-    #expect(SwiftRestVersion.current == "4.5.0")
+    #expect(SwiftRestVersion.current == "4.6.0")
 
     _ = try SwiftRestClient("https://api.example.com")
 }

@@ -187,5 +187,5 @@ public struct SwiftRestConfig: Sendable {
 
 /// Source-level version marker for this release line.
 public enum SwiftRestVersion {
-    public static let current = "4.5.0"
+    public static let current = "4.6.0"
 }

@@ -112,12 +112,14 @@ final class UserViewModel: ObservableObject {
 
 ## One Request Flow
 
-SwiftRest V4 keeps one request chain with 3 clear outputs.
+SwiftRest V4 keeps one request chain with 4 clear outputs.
 
 ```swift
 let value: User = try await client.path("users/1").get().value()
 
 let response: SwiftRestResponse<User> = try await client.path("users/1").get().response()
+
+try await client.path("users/1").get().send() // success/failure only
 
 let result: SwiftRestResult<User, APIErrorModel> =
     await client.path("users/1").get().result(error: APIErrorModel.self)
@@ -476,6 +478,15 @@ let created: User = try await client
 ### Success-only call (no model needed)
 
 ```swift
+try await client
+    .path("users/1")
+    .delete()
+    .send()
+```
+
+If you want to inspect status/headers instead:
+
+```swift
 let raw = try await client
     .path("users/1")
     .delete()
@@ -483,6 +494,17 @@ let raw = try await client
 
 if raw.isSuccess {
     print("Delete worked")
+}
+```
+
+Logout example:
+
+```swift
+func logout(_ request: LogoutRequest) async throws {
+    try await client
+        .path("v1/auth/logout")
+        .post(body: request)
+        .send()
 }
 ```
 
@@ -679,4 +701,4 @@ Thanks to everyone who tests, reports issues, and contributes improvements.
 
 ## Version
 
-Current source version marker: `SwiftRestVersion.current == "4.5.0"`
+Current source version marker: `SwiftRestVersion.current == "4.6.0"`

@@ -254,6 +254,14 @@ public struct SwiftRestPreparedRequest: Sendable {
         return try await client.executeRaw(request, allowHTTPError: allowHTTPError)
     }
 
+    /// Executes request when you only care about success/failure.
+    ///
+    /// Throws for non-2xx responses and transport/decoding errors.
+    public func send() async throws {
+        let request = try await materializedRequest()
+        try await client.executeAsyncWithoutResponse(request)
+    }
+
     /// Executes request and returns result-style success/apiError/failure output.
     public func result<Success: Decodable & Sendable, APIError: Decodable & Sendable>(
         as successType: Success.Type = Success.self,
