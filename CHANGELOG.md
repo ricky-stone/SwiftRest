@@ -1,5 +1,19 @@
 # Changelog
 
+## 4.7.0 - 2026-02-19
+
+### Added
+- Chainable path segment helpers on the V4 request chain:
+  - `SwiftRestPathBuilder.path(_:)`
+  - `SwiftRestPathBuilder.paths(_:)`
+- Automatic path segment normalization:
+  - leading/trailing slashes are trimmed while joining
+  - duplicate separators are collapsed when segments are appended
+- New tests for segment chaining and slash normalization behavior.
+
+### Changed
+- README now includes beginner-friendly chainable path examples and clearly notes that manual `/` separators are not required.
+
 ## 4.6.0 - 2026-02-18
 
 ### Added

@@ -15,8 +15,36 @@ public struct SwiftRestPathBuilder: Sendable {
 
     init(client: SwiftRestClient, path: String) {
         self.client = client
-        self.request = SwiftRestRequest(path: path, method: .get)
+        self.request = SwiftRestRequest(path: Self.normalizedPath(path), method: .get)
         self.deferredApplier = { _, _ in }
+    }
+
+    /// Appends one path segment.
+    ///
+    /// You do not need to manually add `/` between segments.
+    /// Both `.path("v1").path("users")` and `.path("v1/users")` are valid.
+    public func path(_ segment: String) -> Self {
+        var copy = self
+        copy.request.configurePath(Self.joinedPath(copy.request.path, segment))
+        return copy
+    }
+
+    /// Appends multiple path segments.
+    ///
+    /// You do not need to manually add `/` between segments.
+    public func paths(_ segments: String...) -> Self {
+        paths(segments)
+    }
+
+    /// Appends a sequence of path segments.
+    ///
+    /// You do not need to manually add `/` between segments.
+    public func paths<S: Sequence>(_ segments: S) -> Self where S.Element == String {
+        var copy = self
+        for segment in segments {
+            copy.request.configurePath(Self.joinedPath(copy.request.path, segment))
+        }
+        return copy
     }
 
     /// Adds/overwrites a header for this request only.
@@ -200,6 +228,22 @@ public struct SwiftRestPathBuilder: Sendable {
             try existing(&request, coding)
             try applier(&request, coding)
         }
+    }
+
+    private static func joinedPath(_ current: String, _ next: String) -> String {
+        let segments = pathSegments(from: current) + pathSegments(from: next)
+        return segments.joined(separator: "/")
+    }
+
+    private static func normalizedPath(_ path: String) -> String {
+        pathSegments(from: path).joined(separator: "/")
+    }
+
+    private static func pathSegments(from rawPath: String) -> [String] {
+        rawPath
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: "/")
+            .map(String.init)
     }
 }
 

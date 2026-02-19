@@ -125,6 +125,36 @@ let result: SwiftRestResult<User, APIErrorModel> =
     await client.path("users/1").get().result(error: APIErrorModel.self)
 ```
 
+## Chainable Paths (No Manual `/` Needed)
+
+Build paths in small readable segments:
+
+```swift
+let settings: AppSettings = try await client
+    .path("v1")
+    .path("system")
+    .path(sessionId)
+    .path("app-settings")
+    .get()
+    .value()
+```
+
+Variadic helper:
+
+```swift
+let settings: AppSettings = try await client
+    .path("v1")
+    .paths("system", sessionId, "app-settings")
+    .get()
+    .value()
+```
+
+Notes:
+
+- You do not need to type `/` between segments.
+- Extra leading/trailing slashes are normalized automatically.
+- If you already have a full path string, `client.path("v1/system/app-settings")` still works.
+
 ## Headers Made Easy
 
 ### Client default headers (every request)
@@ -701,4 +731,4 @@ Thanks to everyone who tests, reports issues, and contributes improvements.
 
 ## Version
 
-Current source version marker: `SwiftRestVersion.current == "4.6.0"`
+Current source version marker: `SwiftRestVersion.current == "4.7.0"`

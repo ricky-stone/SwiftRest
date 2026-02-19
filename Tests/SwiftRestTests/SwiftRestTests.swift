@@ -950,6 +950,35 @@ private actor RefreshedTokensSink {
     }
 }
 
+@Test func testV4ChainPathSegmentsAppendWithoutManualSlashes() async throws {
+    let client = try makeSimpleSuccessClient()
+
+    let chained = try await client
+        .path("v1/")
+        .path("/sessions/")
+        .path("abc123")
+        .path("events")
+        .get()
+        .raw()
+    #expect(chained.finalURL?.absoluteString == "https://api.example.com/v1/sessions/abc123/events")
+
+    let variadic = try await client
+        .path("/v1//")
+        .paths("sessions", "/abc123/", "events")
+        .get()
+        .raw()
+    #expect(variadic.finalURL?.absoluteString == "https://api.example.com/v1/sessions/abc123/events")
+
+    let emptySegments = try await client
+        .path("v1")
+        .path("")
+        .path("/")
+        .path("users")
+        .get()
+        .raw()
+    #expect(emptySegments.finalURL?.absoluteString == "https://api.example.com/v1/users")
+}
+
 @Test func testV4ChainSupportsHeadAndOptionsMethods() async throws {
     let client = try makeMethodEchoClient()
 
@@ -1425,7 +1454,7 @@ private actor RefreshedTokensSink {
     )
     #expect(SwiftRestConfig.standard.debugLogging.isEnabled == false)
     #expect(SwiftRestConfig.standard.authRefresh.isEnabled == false)
-    #expect(SwiftRestVersion.current == "4.6.0")
+    #expect(SwiftRestVersion.current == "4.7.0")
 
     _ = try SwiftRestClient("https://api.example.com")
 }

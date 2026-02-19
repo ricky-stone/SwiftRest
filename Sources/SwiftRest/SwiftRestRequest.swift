@@ -130,6 +130,13 @@ public struct SwiftRestRequest: Sendable {
         self.method = method
     }
 
+    /// Replaces the request path.
+    ///
+    /// Used by V4 chain helpers to append/normalize path segments.
+    public mutating func configurePath(_ path: String) {
+        self.path = path
+    }
+
     public mutating func configureJSONCoding(_ coding: SwiftRestJSONCoding) {
         self.jsonCoding = coding
     }
