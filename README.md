@@ -655,6 +655,8 @@ V4 preferred style:
 - Setup: `SwiftRest.for(...). ... .client`
 - Requests: `client.path(...).verb().value/response/result`
 
+Legacy V3-style convenience methods on `SwiftRestClient` are now deprecated and show migration warnings.
+
 You can still keep your models (`Decodable & Sendable`, `Encodable & Sendable`) the same.
 
 ## License
@@ -677,4 +679,4 @@ Thanks to everyone who tests, reports issues, and contributes improvements.
 
 ## Version
 
-Current source version marker: `SwiftRestVersion.current == "4.4.0"`
+Current source version marker: `SwiftRestVersion.current == "4.5.0"`

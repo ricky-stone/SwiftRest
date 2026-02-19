@@ -19,30 +19,35 @@ public struct SwiftRestPathBuilder: Sendable {
         self.deferredApplier = { _, _ in }
     }
 
+    /// Adds/overwrites a header for this request only.
     public func header(_ name: String, _ value: String) -> Self {
         var copy = self
         copy.request.addHeader(name, value)
         return copy
     }
 
+    /// Adds/overwrites multiple headers for this request only.
     public func headers(_ values: [String: String]) -> Self {
         var copy = self
         copy.request.addHeaders(values)
         return copy
     }
 
+    /// Adds/overwrites one query parameter for this request.
     public func parameter(_ key: String, _ value: String) -> Self {
         var copy = self
         copy.request.addParameter(key, value)
         return copy
     }
 
+    /// Adds/overwrites multiple query parameters for this request.
     public func parameters(_ values: [String: String]) -> Self {
         var copy = self
         copy.request.addParameters(values)
         return copy
     }
 
+    /// Encodes an `Encodable` query model into URL query parameters.
     public func query<Query: Encodable & Sendable>(
         _ query: Query
     ) throws -> Self {
@@ -53,24 +58,30 @@ public struct SwiftRestPathBuilder: Sendable {
         return copy
     }
 
+    /// Sets a per-request bearer token.
+    ///
+    /// Precedence: per-request token > provider token > static client token.
     public func authToken(_ token: String) -> Self {
         var copy = self
         copy.request.addAuthToken(token)
         return copy
     }
 
+    /// Enables/disables auth header injection for this request.
     public func noAuth(_ disabled: Bool = true) -> Self {
         var copy = self
         copy.request = copy.request.noAuth(disabled)
         return copy
     }
 
+    /// Enables/disables auth refresh handling for this request.
     public func autoRefresh(_ enabled: Bool) -> Self {
         var copy = self
         copy.request.configureAutoRefresh(enabled)
         return copy
     }
 
+    /// Overrides refresh-token lookup for this request if refresh is triggered.
     public func refreshTokenProvider(
         _ provider: @escaping SwiftRestRefreshTokenProvider
     ) -> Self {
@@ -79,18 +90,21 @@ public struct SwiftRestPathBuilder: Sendable {
         return copy
     }
 
+    /// Overrides retry policy for this request only.
     public func retry(_ policy: RetryPolicy) -> Self {
         var copy = self
         copy.request.configureRetryPolicy(policy)
         return copy
     }
 
+    /// Overrides full JSON coding strategy for this request only.
     public func json(_ coding: SwiftRestJSONCoding) -> Self {
         var copy = self
         copy.request.configureJSONCoding(coding)
         return copy
     }
 
+    /// Overrides simplified date coding behavior for this request only.
     public func jsonDates(_ dates: SwiftRestJSONDates) -> Self {
         var copy = self
         let coding = (copy.request.jsonCoding ?? .foundationDefault)
@@ -100,6 +114,7 @@ public struct SwiftRestPathBuilder: Sendable {
         return copy
     }
 
+    /// Overrides simplified key coding behavior for this request only.
     public func jsonKeys(_ keys: SwiftRestJSONKeys) -> Self {
         var copy = self
         let coding = (copy.request.jsonCoding ?? .foundationDefault)
@@ -109,34 +124,41 @@ public struct SwiftRestPathBuilder: Sendable {
         return copy
     }
 
+    /// Prepares a `GET` request.
     public func get() -> SwiftRestPreparedRequest {
         prepared(method: .get)
     }
 
+    /// Prepares a `HEAD` request.
     public func head() -> SwiftRestPreparedRequest {
         prepared(method: .head)
     }
 
+    /// Prepares an `OPTIONS` request.
     public func options() -> SwiftRestPreparedRequest {
         prepared(method: .options)
     }
 
+    /// Prepares a `DELETE` request.
     public func delete() -> SwiftRestPreparedRequest {
         prepared(method: .delete)
     }
 
+    /// Prepares a `POST` request with a JSON-encoded body.
     public func post<Body: Encodable & Sendable>(
         body: Body
     ) throws -> SwiftRestPreparedRequest {
         try prepared(method: .post, body: body)
     }
 
+    /// Prepares a `PUT` request with a JSON-encoded body.
     public func put<Body: Encodable & Sendable>(
         body: Body
     ) throws -> SwiftRestPreparedRequest {
         try prepared(method: .put, body: body)
     }
 
+    /// Prepares a `PATCH` request with a JSON-encoded body.
     public func patch<Body: Encodable & Sendable>(
         body: Body
     ) throws -> SwiftRestPreparedRequest {
@@ -204,6 +226,7 @@ public struct SwiftRestPreparedRequest: Sendable {
         )
     }
 
+    /// Executes request and returns a decoded value.
     @discardableResult
     public func value<T: Decodable & Sendable>(
         as type: T.Type = T.self
@@ -212,6 +235,7 @@ public struct SwiftRestPreparedRequest: Sendable {
         return try await client.execute(request, as: type)
     }
 
+    /// Executes request and returns decoded payload plus response metadata.
     public func response<T: Decodable & Sendable>(
         as type: T.Type = T.self
     ) async throws -> SwiftRestResponse<T> {
@@ -220,6 +244,9 @@ public struct SwiftRestPreparedRequest: Sendable {
         return try await client.executeAsyncWithResponse(request)
     }
 
+    /// Executes request and returns raw payload + headers.
+    ///
+    /// Defaults to `allowHTTPError = true` to simplify status-code inspection.
     public func raw(
         allowHTTPError: Bool = true
     ) async throws -> SwiftRestRawResponse {
@@ -227,6 +254,7 @@ public struct SwiftRestPreparedRequest: Sendable {
         return try await client.executeRaw(request, allowHTTPError: allowHTTPError)
     }
 
+    /// Executes request and returns result-style success/apiError/failure output.
     public func result<Success: Decodable & Sendable, APIError: Decodable & Sendable>(
         as successType: Success.Type = Success.self,
         error errorType: APIError.Type = APIError.self
@@ -242,6 +270,9 @@ public struct SwiftRestPreparedRequest: Sendable {
         return await client.executeResult(request, as: successType, error: errorType)
     }
 
+    /// Executes request and returns both decoded value and response headers.
+    ///
+    /// Throws `emptyResponseBody` when the response has no decodable payload.
     public func valueAndHeaders<T: Decodable & Sendable>(
         as type: T.Type = T.self
     ) async throws -> (value: T, headers: HTTPHeaders) {

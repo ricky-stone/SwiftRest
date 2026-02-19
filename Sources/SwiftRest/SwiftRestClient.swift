@@ -182,8 +182,9 @@ public actor SwiftRestClient: RestClientType {
         authRefreshTask = nil
     }
 
-    // MARK: - Beginner-friendly HTTP verbs
+    // MARK: - Legacy V3 HTTP Verbs (Deprecated)
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func getRaw(
         _ path: String,
         parameters: [String: String] = [:],
@@ -202,6 +203,7 @@ public actor SwiftRestClient: RestClientType {
         return try await executeRaw(request, allowHTTPError: allowHTTPError)
     }
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func getRaw<Query: Encodable & Sendable>(
         _ path: String,
         query: Query,
@@ -220,6 +222,7 @@ public actor SwiftRestClient: RestClientType {
         return try await executeRaw(request, allowHTTPError: allowHTTPError)
     }
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     @discardableResult
     public func get<T: Decodable & Sendable>(
         _ path: String,
@@ -239,6 +242,7 @@ public actor SwiftRestClient: RestClientType {
         return try await execute(request, as: type)
     }
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     @discardableResult
     public func get<T: Decodable & Sendable, Query: Encodable & Sendable>(
         _ path: String,
@@ -259,6 +263,7 @@ public actor SwiftRestClient: RestClientType {
     }
 
     /// Executes `GET` and returns both metadata and decoded payload.
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func getResponse<T: Decodable & Sendable>(
         _ path: String,
         as type: T.Type = T.self,
@@ -279,6 +284,7 @@ public actor SwiftRestClient: RestClientType {
     }
 
     /// Executes `GET` and returns both metadata and decoded payload.
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func getResponse<T: Decodable & Sendable, Query: Encodable & Sendable>(
         _ path: String,
         as type: T.Type = T.self,
@@ -298,6 +304,7 @@ public actor SwiftRestClient: RestClientType {
         return try await executeAsyncWithResponse(request)
     }
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func deleteRaw(
         _ path: String,
         parameters: [String: String] = [:],
@@ -316,6 +323,7 @@ public actor SwiftRestClient: RestClientType {
         return try await executeRaw(request, allowHTTPError: allowHTTPError)
     }
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func deleteRaw<Query: Encodable & Sendable>(
         _ path: String,
         query: Query,
@@ -334,6 +342,7 @@ public actor SwiftRestClient: RestClientType {
         return try await executeRaw(request, allowHTTPError: allowHTTPError)
     }
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     @discardableResult
     public func delete<T: Decodable & Sendable>(
         _ path: String,
@@ -353,6 +362,7 @@ public actor SwiftRestClient: RestClientType {
         return try await execute(request, as: type)
     }
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     @discardableResult
     public func delete<T: Decodable & Sendable, Query: Encodable & Sendable>(
         _ path: String,
@@ -373,6 +383,7 @@ public actor SwiftRestClient: RestClientType {
     }
 
     /// Executes `DELETE` and returns both metadata and decoded payload.
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func deleteResponse<T: Decodable & Sendable>(
         _ path: String,
         as type: T.Type = T.self,
@@ -393,6 +404,7 @@ public actor SwiftRestClient: RestClientType {
     }
 
     /// Executes `DELETE` and returns both metadata and decoded payload.
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func deleteResponse<T: Decodable & Sendable, Query: Encodable & Sendable>(
         _ path: String,
         as type: T.Type = T.self,
@@ -412,6 +424,7 @@ public actor SwiftRestClient: RestClientType {
         return try await executeAsyncWithResponse(request)
     }
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func postRaw<Body: Encodable & Sendable>(
         _ path: String,
         body: Body,
@@ -432,6 +445,7 @@ public actor SwiftRestClient: RestClientType {
         return try await executeRaw(request, allowHTTPError: allowHTTPError)
     }
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     @discardableResult
     public func post<Body: Encodable & Sendable, Response: Decodable & Sendable>(
         _ path: String,
@@ -454,6 +468,7 @@ public actor SwiftRestClient: RestClientType {
     }
 
     /// Executes `POST` and returns both metadata and decoded payload.
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func postResponse<Body: Encodable & Sendable, Response: Decodable & Sendable>(
         _ path: String,
         body: Body,
@@ -475,6 +490,7 @@ public actor SwiftRestClient: RestClientType {
         return try await executeAsyncWithResponse(request)
     }
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func putRaw<Body: Encodable & Sendable>(
         _ path: String,
         body: Body,
@@ -495,6 +511,7 @@ public actor SwiftRestClient: RestClientType {
         return try await executeRaw(request, allowHTTPError: allowHTTPError)
     }
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     @discardableResult
     public func put<Body: Encodable & Sendable, Response: Decodable & Sendable>(
         _ path: String,
@@ -517,6 +534,7 @@ public actor SwiftRestClient: RestClientType {
     }
 
     /// Executes `PUT` and returns both metadata and decoded payload.
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func putResponse<Body: Encodable & Sendable, Response: Decodable & Sendable>(
         _ path: String,
         body: Body,
@@ -538,6 +556,7 @@ public actor SwiftRestClient: RestClientType {
         return try await executeAsyncWithResponse(request)
     }
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func patchRaw<Body: Encodable & Sendable>(
         _ path: String,
         body: Body,
@@ -558,6 +577,7 @@ public actor SwiftRestClient: RestClientType {
         return try await executeRaw(request, allowHTTPError: allowHTTPError)
     }
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     @discardableResult
     public func patch<Body: Encodable & Sendable, Response: Decodable & Sendable>(
         _ path: String,
@@ -580,6 +600,7 @@ public actor SwiftRestClient: RestClientType {
     }
 
     /// Executes `PATCH` and returns both metadata and decoded payload.
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func patchResponse<Body: Encodable & Sendable, Response: Decodable & Sendable>(
         _ path: String,
         body: Body,
@@ -601,8 +622,9 @@ public actor SwiftRestClient: RestClientType {
         return try await executeAsyncWithResponse(request)
     }
 
-    // MARK: - Result-style HTTP verbs
+    // MARK: - Legacy V3 Result APIs (Deprecated)
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func getResult<Success: Decodable & Sendable, APIError: Decodable & Sendable>(
         _ path: String,
         as type: Success.Type = Success.self,
@@ -624,6 +646,7 @@ public actor SwiftRestClient: RestClientType {
         return await executeResult(request, as: Success.self, error: APIError.self)
     }
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func getResult<Success: Decodable & Sendable, APIError: Decodable & Sendable, Query: Encodable & Sendable>(
         _ path: String,
         as type: Success.Type = Success.self,
@@ -651,6 +674,7 @@ public actor SwiftRestClient: RestClientType {
         }
     }
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func deleteResult<Success: Decodable & Sendable, APIError: Decodable & Sendable>(
         _ path: String,
         as type: Success.Type = Success.self,
@@ -672,6 +696,7 @@ public actor SwiftRestClient: RestClientType {
         return await executeResult(request, as: Success.self, error: APIError.self)
     }
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func deleteResult<Success: Decodable & Sendable, APIError: Decodable & Sendable, Query: Encodable & Sendable>(
         _ path: String,
         as type: Success.Type = Success.self,
@@ -699,6 +724,7 @@ public actor SwiftRestClient: RestClientType {
         }
     }
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func postResult<Body: Encodable & Sendable, Success: Decodable & Sendable, APIError: Decodable & Sendable>(
         _ path: String,
         body: Body,
@@ -728,6 +754,7 @@ public actor SwiftRestClient: RestClientType {
         }
     }
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func putResult<Body: Encodable & Sendable, Success: Decodable & Sendable, APIError: Decodable & Sendable>(
         _ path: String,
         body: Body,
@@ -757,6 +784,7 @@ public actor SwiftRestClient: RestClientType {
         }
     }
 
+    @available(*, deprecated, message: "Legacy V3 API. Use V4 chain style: client.path(...).verb().value()/response()/raw()/result().")
     public func patchResult<Body: Encodable & Sendable, Success: Decodable & Sendable, APIError: Decodable & Sendable>(
         _ path: String,
         body: Body,

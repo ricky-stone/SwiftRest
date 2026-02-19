@@ -1,5 +1,25 @@
 # Changelog
 
+## 4.5.0 - 2026-02-18
+
+### Changed
+- Deprecated legacy V3-style convenience APIs on `SwiftRestClient`:
+  - `getRaw/get/getResponse`
+  - `deleteRaw/delete/deleteResponse`
+  - `postRaw/post/postResponse`
+  - `putRaw/put/putResponse`
+  - `patchRaw/patch/patchResponse`
+  - `getResult/deleteResult/postResult/putResult/patchResult`
+- Added migration-focused deprecation messages pointing to the V4 chain API:
+  - `client.path(...).verb().value()/response()/raw()/result()`
+- Expanded inline API documentation comments across V4 types for better Xcode option-click help:
+  - `SwiftRestBuilder`
+  - `SwiftRestPathBuilder`
+  - `SwiftRestPreparedRequest`
+  - `SwiftRestAuthRefresh` and endpoint configuration
+  - `SwiftRestJSONDates` and `SwiftRestJSONKeys`
+- README migration section now explicitly notes that legacy V3-style methods are deprecated.
+
 ## 4.4.0 - 2026-02-18
 
 ### Added

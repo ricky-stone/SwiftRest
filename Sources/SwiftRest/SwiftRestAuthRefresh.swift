@@ -16,15 +16,24 @@ public typealias SwiftRestCustomRefreshHandler = @Sendable (SwiftRestRefreshCont
 
 /// Endpoint-driven refresh settings for beginner-friendly setup.
 public struct SwiftRestAuthRefreshEndpoint: Sendable {
+    /// Refresh endpoint path relative to client base URL.
     public var endpoint: String
+    /// HTTP method used for the refresh request.
     public var method: HTTPMethod
+    /// Async provider for current refresh token value.
     public var refreshTokenProvider: SwiftRestRefreshTokenProvider
+    /// Request JSON key used to send refresh token value.
     public var refreshTokenField: String
+    /// Response JSON key used to read the new access token.
     public var tokenField: String
+    /// Optional response JSON key used to read rotated refresh token values.
     public var refreshTokenResponseField: String?
+    /// Optional callback invoked when refreshed token values are resolved.
     public var onTokensRefreshed: SwiftRestTokensRefreshedHandler?
+    /// Extra headers added to the refresh request.
     public var headers: [String: String]
 
+    /// Creates endpoint-based refresh settings.
     public init(
         endpoint: String,
         method: HTTPMethod = .post,
@@ -48,8 +57,11 @@ public struct SwiftRestAuthRefreshEndpoint: Sendable {
 
 /// Defines how auth refresh should resolve a new access token.
 public enum SwiftRestAuthRefreshMode: Sendable {
+    /// Disables refresh behavior.
     case disabled
+    /// Uses endpoint-based refresh configuration.
     case endpoint(SwiftRestAuthRefreshEndpoint)
+    /// Uses a fully custom refresh closure.
     case custom(SwiftRestCustomRefreshHandler)
 }
 
@@ -69,6 +81,7 @@ public struct SwiftRestAuthRefresh: Sendable {
     /// Default: `[401]`.
     public var triggerStatusCodes: Set<Int>
 
+    /// Creates auth refresh configuration.
     public init(
         mode: SwiftRestAuthRefreshMode,
         appliesToPerRequestToken: Bool = false,
@@ -116,6 +129,8 @@ public struct SwiftRestAuthRefresh: Sendable {
     }
 
     /// Advanced custom mode.
+    ///
+    /// Use when refresh requires non-standard payloads or additional branching logic.
     public static func custom(
         _ handler: @escaping SwiftRestCustomRefreshHandler,
         triggerStatusCodes: Set<Int> = [401]
@@ -126,22 +141,26 @@ public struct SwiftRestAuthRefresh: Sendable {
         )
     }
 
+    /// Configures whether per-request auth tokens participate in refresh flow.
     public func appliesToPerRequestToken(_ applies: Bool) -> Self {
         var copy = self
         copy.appliesToPerRequestToken = applies
         return copy
     }
 
+    /// Sets auth status codes that should trigger refresh behavior.
     public func triggerStatusCodes(_ statusCodes: Set<Int>) -> Self {
         var copy = self
         copy.triggerStatusCodes = Self.normalizedTriggerStatusCodes(statusCodes)
         return copy
     }
 
+    /// Sets auth status codes that should trigger refresh behavior.
     public func triggerStatusCodes(_ statusCodes: [Int]) -> Self {
         triggerStatusCodes(Set(statusCodes))
     }
 
+    /// Indicates whether refresh behavior is currently enabled.
     public var isEnabled: Bool {
         switch mode {
         case .disabled:
