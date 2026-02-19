@@ -22,27 +22,58 @@ public struct SwiftRestPathBuilder: Sendable {
     /// Appends one path segment.
     ///
     /// You do not need to manually add `/` between segments.
-    /// Both `.path("v1").path("users")` and `.path("v1/users")` are valid.
-    public func path(_ segment: String) -> Self {
+    /// Supports primitives like `String`, `Int`, `Bool`, `Double`, and `UUID`.
+    public func path<Segment: SwiftRestPathSegmentConvertible>(_ segment: Segment) -> Self {
         var copy = self
-        copy.request.configurePath(Self.joinedPath(copy.request.path, segment))
+        copy.request.configurePath(
+            Self.joinedPath(copy.request.path, segment.swiftRestPathSegment)
+        )
         return copy
+    }
+
+    /// Appends path components from a URL.
+    ///
+    /// Only `url.path` is used. Scheme, host, query, and fragment are ignored.
+    public func path(url: URL) -> Self {
+        paths(Self.pathSegments(from: url.path))
     }
 
     /// Appends multiple path segments.
     ///
     /// You do not need to manually add `/` between segments.
-    public func paths(_ segments: String...) -> Self {
-        paths(segments)
+    public func paths(_ segments: any SwiftRestPathSegmentConvertible...) -> Self {
+        var copy = self
+        for segment in segments {
+            copy.request.configurePath(
+                Self.joinedPath(copy.request.path, segment.swiftRestPathSegment)
+            )
+        }
+        return copy
     }
 
     /// Appends a sequence of path segments.
     ///
     /// You do not need to manually add `/` between segments.
-    public func paths<S: Sequence>(_ segments: S) -> Self where S.Element == String {
+    public func paths<S: Sequence>(_ segments: S) -> Self where S.Element: SwiftRestPathSegmentConvertible {
         var copy = self
         for segment in segments {
-            copy.request.configurePath(Self.joinedPath(copy.request.path, segment))
+            copy.request.configurePath(
+                Self.joinedPath(copy.request.path, segment.swiftRestPathSegment)
+            )
+        }
+        return copy
+    }
+
+    /// Appends a sequence of type-erased path segments.
+    ///
+    /// Useful when your segments are stored as `[any SwiftRestPathSegmentConvertible]`.
+    public func paths<S: Sequence>(_ segments: S) -> Self
+    where S.Element == any SwiftRestPathSegmentConvertible {
+        var copy = self
+        for segment in segments {
+            copy.request.configurePath(
+                Self.joinedPath(copy.request.path, segment.swiftRestPathSegment)
+            )
         }
         return copy
     }

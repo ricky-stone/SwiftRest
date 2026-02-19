@@ -977,6 +977,37 @@ private actor RefreshedTokensSink {
         .get()
         .raw()
     #expect(emptySegments.finalURL?.absoluteString == "https://api.example.com/v1/users")
+
+    let fixedUUID = try #require(UUID(uuidString: "D2719D2A-E7DE-48E1-A5FD-2241F0587B37"))
+    let primitiveSegments = try await client
+        .path("v1")
+        .path("users")
+        .path(42)
+        .path(true)
+        .path(1.5)
+        .path(fixedUUID)
+        .get()
+        .raw()
+    #expect(
+        primitiveSegments.finalURL?.absoluteString
+            == "https://api.example.com/v1/users/42/true/1.5/\(fixedUUID.uuidString)"
+    )
+
+    let typeErased: [any SwiftRestPathSegmentConvertible] = ["v1", "teams", 7, "players"]
+    let typeErasedSegments = try await client
+        .path("api")
+        .paths(typeErased)
+        .get()
+        .raw()
+    #expect(typeErasedSegments.finalURL?.absoluteString == "https://api.example.com/api/v1/teams/7/players")
+
+    let fromURL = try #require(URL(string: "https://ignored.example.com/system/app-settings/88?env=prod#frag"))
+    let urlPath = try await client
+        .path("v1")
+        .path(url: fromURL)
+        .get()
+        .raw()
+    #expect(urlPath.finalURL?.absoluteString == "https://api.example.com/v1/system/app-settings/88")
 }
 
 @Test func testV4ChainSupportsHeadAndOptionsMethods() async throws {
@@ -1454,7 +1485,7 @@ private actor RefreshedTokensSink {
     )
     #expect(SwiftRestConfig.standard.debugLogging.isEnabled == false)
     #expect(SwiftRestConfig.standard.authRefresh.isEnabled == false)
-    #expect(SwiftRestVersion.current == "4.7.0")
+    #expect(SwiftRestVersion.current == "4.8.0")
 
     _ = try SwiftRestClient("https://api.example.com")
 }

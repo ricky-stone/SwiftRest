@@ -149,11 +149,35 @@ let settings: AppSettings = try await client
     .value()
 ```
 
+Primitive segments are supported directly:
+
+```swift
+let user: User = try await client
+    .path("v1")
+    .path("users")
+    .path(42)   // Int
+    .get()
+    .value()
+```
+
+You can also append path components from a URL:
+
+```swift
+let source = URL(string: "https://other.host/system/app-settings/88?env=prod")!
+
+let settings: AppSettings = try await client
+    .path("v1")
+    .path(url: source) // appends only /system/app-settings/88
+    .get()
+    .value()
+```
+
 Notes:
 
 - You do not need to type `/` between segments.
 - Extra leading/trailing slashes are normalized automatically.
 - If you already have a full path string, `client.path("v1/system/app-settings")` still works.
+- Supported segment types include `String`, `Substring`, all integer types, `Double`, `Float`, `Decimal`, `Bool`, and `UUID`.
 
 ## Headers Made Easy
 
@@ -731,4 +755,4 @@ Thanks to everyone who tests, reports issues, and contributes improvements.
 
 ## Version
 
-Current source version marker: `SwiftRestVersion.current == "4.7.0"`
+Current source version marker: `SwiftRestVersion.current == "4.8.0"`

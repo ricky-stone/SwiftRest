@@ -1,5 +1,19 @@
 # Changelog
 
+## 4.8.0 - 2026-02-19
+
+### Added
+- Typed path segment support for V4 request chains.
+  - New `SwiftRestPathSegmentConvertible` protocol.
+  - Built-in support for: `String`, `Substring`, all integer types, `Double`, `Float`, `Decimal`, `Bool`, and `UUID`.
+- New URL path append helper:
+  - `SwiftRestPathBuilder.path(url:)`
+  - Appends only URL path components (ignores scheme, host, query, and fragment).
+- New tests for typed path segments and URL-based path appending.
+
+### Changed
+- README chainable path docs now include primitive and URL examples for beginners.
+
 ## 4.7.0 - 2026-02-19
 
 ### Added
