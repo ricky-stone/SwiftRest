@@ -15,6 +15,20 @@ public actor SwiftRestClient: RestClientType {
     private var authRefresh: SwiftRestAuthRefresh
     private var authRefreshTask: Task<String?, Error>?
 
+    /// Creates a client from a validated base URL without throwing.
+    public init(
+        baseURL: URL,
+        config: SwiftRestConfig = .standard,
+        session: URLSession = .shared
+    ) {
+        self.baseURL = baseURL
+        self.config = config
+        self.session = session
+        self.accessToken = config.accessToken
+        self.accessTokenProvider = config.accessTokenProvider
+        self.authRefresh = config.authRefresh
+    }
+
     public init(
         _ url: String,
         config: SwiftRestConfig = .standard,
@@ -29,12 +43,7 @@ public actor SwiftRestClient: RestClientType {
             throw SwiftRestClientError.invalidBaseURL(url)
         }
 
-        self.baseURL = parsed
-        self.config = config
-        self.session = session
-        self.accessToken = config.accessToken
-        self.accessTokenProvider = config.accessTokenProvider
-        self.authRefresh = config.authRefresh
+        self.init(baseURL: parsed, config: config, session: session)
     }
 
     // MARK: - Low-level API

@@ -6,12 +6,33 @@
 [![Swift Package Index](https://img.shields.io/badge/Swift%20Package%20Index-SwiftRest-111111)](https://swiftpackageindex.com/ricky-stone/SwiftRest)
 [![GitHub stars](https://img.shields.io/github/stars/ricky-stone/SwiftRest?style=social)](https://github.com/ricky-stone/SwiftRest/stargazers)
 
-SwiftRest is a Swift 6 REST client with one clean chain-first API.
+SwiftRest 5 is a Swift 6 REST client that stays simple for beginners and still gives advanced teams the control they need.
 
-- Swift 6 concurrency-safe (`SwiftRestClient` is an `actor`)
-- Simple setup chain (`SwiftRest.for(...).client`)
-- Simple request chain (`client.path(...).get().value()`)
-- Easy headers, typed results, and built-in auto refresh
+The main ideas are:
+- Use a plain HTTP client when you only want requests and responses.
+- Use the auth/session client when you want SwiftRest to store tokens, attach them automatically, and refresh them after a `401`.
+- Read headers, raw bodies, decoded values, or full response metadata with one request.
+- Keep the API actor-safe and concurrency-safe.
+- Choose simple storage presets like Keychain, `UserDefaults`, memory only, or no persistence.
+
+## Contents
+- [Requirements](#requirements)
+- [Install](#install)
+- [Defaults At A Glance](#defaults-at-a-glance)
+- [Plain Client](#plain-client)
+- [Auth And Session Client](#auth-and-session-client)
+- [More Settings](#more-settings)
+- [Storage Options](#storage-options)
+- [Token Mapping](#token-mapping)
+- [Login Refresh And Logout](#login-refresh-and-logout)
+- [Headers Made Easy](#headers-made-easy)
+- [Paths And Query](#paths-and-query)
+- [HTTP Methods](#http-methods)
+- [JSON Options](#json-options)
+- [Error Handling](#error-handling)
+- [SwiftUI Example](#swiftui-example)
+- [Acknowledgements](#acknowledgements)
+- [License](#license)
 
 ## Requirements
 
@@ -19,37 +40,38 @@ SwiftRest is a Swift 6 REST client with one clean chain-first API.
 - iOS 15+
 - macOS 12+
 
-## Installation
+## Install
 
-Use Swift Package Manager with:
-
-- `https://github.com/ricky-stone/SwiftRest.git`
-
-## Default Client Behavior
-
-This is the minimum setup:
+Swift Package Manager:
 
 ```swift
-let client = try SwiftRest.for("https://api.example.com").client
+.package(url: "https://github.com/ricky-stone/SwiftRest.git", from: "5.0.0")
 ```
 
-Defaults used by this client:
+## Defaults At A Glance
 
-- `Accept: application/json`
-- `timeout = 30` seconds
-- `retry = .standard` (3 attempts total)
-- `json = .default` (Foundation key/date behavior)
-- `logging = .off`
-- no access token, no auto refresh
+These are the common defaults you get when you use SwiftRest 5 in the simplest way.
 
-## Community
+| Area | Default |
+| --- | --- |
+| Plain client setup | `SwiftRest.client(baseURL: ...)` |
+| Auth client setup | `SwiftRest.auth(baseURL: ...)` |
+| Auth storage | Keychain, backed by SwiftKey |
+| Primary token field | `accessToken` |
+| Refresh token field | Not assumed unless you set it |
+| Refresh request field | `refreshToken` |
+| Refresh trigger | `401` |
+| Plain client config | `SwiftRestConfig.standard` |
+| Common web API config | `SwiftRestConfig.webAPI` |
+| Default timeout | 30 seconds |
+| Default retry policy | `RetryPolicy.standard` |
+| Default JSON coding | Foundation defaults |
 
-- Questions and ideas: [GitHub Discussions](https://github.com/ricky-stone/SwiftRest/discussions)
-- Bugs and feature requests: [GitHub Issues](https://github.com/ricky-stone/SwiftRest/issues)
-- Contributing guide: [`CONTRIBUTING.md`](./CONTRIBUTING.md)
-- Security reports: [`SECURITY.md`](./SECURITY.md)
+If your API uses snake_case keys and ISO8601 dates, `SwiftRestConfig.webAPI` is usually the quickest start.
 
-## 60-Second Start (Swift)
+## Plain Client
+
+Use the plain client when you only want to call endpoints and decode responses.
 
 ```swift
 import SwiftRest
@@ -59,422 +81,501 @@ struct User: Decodable, Sendable {
     let firstName: String
 }
 
-let client = try SwiftRest
-    .for("https://api.example.com")
-    .json(.default)
-    .jsonDates(.iso8601)
-    .jsonKeys(.useDefaultKeys)
-    .client
+guard let apiURL = URL(string: "https://api.example.com") else {
+    fatalError("Invalid API URL")
+}
 
-let user: User = try await client.path("users/1").get().value()
+let client = SwiftRest.client(baseURL: apiURL)
+
+let user: User = try await client
+    .path("users/1")
+    .get()
+    .value()
+
 print(user.firstName)
 ```
 
-## 60-Second Start (SwiftUI)
+If you want the common web API preset, use `SwiftRestConfig.webAPI`:
 
 ```swift
-import SwiftUI
-import SwiftRest
+let client = SwiftRest.client(baseURL: apiURL, config: .webAPI)
+```
 
-struct User: Decodable, Sendable {
-    let id: Int
-    let firstName: String
-}
+### Plain client headers
 
-@MainActor
-final class UserViewModel: ObservableObject {
-    @Published var name: String = ""
-    @Published var errorText: String?
+For plain clients, set default headers in the config before creating the client.
 
-    private let client: SwiftRestClient
+```swift
+var config = SwiftRestConfig.standard
+config.baseHeaders["X-App-Version"] = "5.0.0"
+config.baseHeaders["X-Platform"] = "iOS"
 
-    init() {
-        client = try! SwiftRest
-            .for("https://api.example.com")
-            .json(.default)
-            .jsonDates(.iso8601)
-            .client
+let client = SwiftRest.client(baseURL: apiURL, config: config)
+```
+
+You can also add headers for just one request:
+
+```swift
+let raw = try await client
+    .path("users/1")
+    .header("X-Trace-ID", UUID().uuidString)
+    .get()
+    .raw()
+```
+
+## Auth And Session Client
+
+Use the auth/session client when you want SwiftRest to keep a token for you.
+
+If you do not choose a store, Keychain is the default.
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .client
+```
+
+If you want to be explicit, this does the same thing and makes the storage choice obvious:
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .keychain()
+    .client
+```
+
+The auth/session client does this for you:
+- loads the saved session before authenticated requests
+- adds the bearer token automatically
+- saves token values after a successful login or refresh when the response matches your configured field names
+- tries the refresh endpoint once after a configured status code, usually `401`
+- retries the original request once if the refresh succeeds
+- lets you clear the session with `logout()`
+
+## More Settings
+
+These settings are optional, but they are useful when you want to make one client behave a certain way.
+
+### Timeout
+
+Change the request timeout in seconds:
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .timeout(10)
+    .client
+```
+
+### Retry
+
+Use the standard retry policy or turn retries off:
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .retry(.standard)
+    .client
+```
+
+### Logging
+
+Logging is off by default. Turn it on when you want to see requests and responses:
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .logging(.basic)
+    .client
+```
+
+If you want headers in the logs too, use `SwiftRestDebugLogging.headers`.
+
+### Custom URLSession
+
+This is useful in tests and when you want an ephemeral or custom session configuration:
+
+```swift
+let sessionConfiguration = URLSessionConfiguration.ephemeral
+let session = URLSession(configuration: sessionConfiguration)
+
+let client = SwiftRest.client(baseURL: apiURL, session: session)
+let auth = SwiftRest.auth(baseURL: apiURL, session: session).client
+```
+
+## Storage Options
+
+SwiftRest gives you four simple storage choices plus a custom option.
+
+### Keychain, backed by SwiftKey
+
+This is the recommended choice for real apps.
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .keychain()
+    .client
+```
+
+SwiftRest uses [SwiftKey](https://github.com/ricky-stone/SwiftKey) internally for this preset.
+
+### UserDefaults
+
+Useful for simple apps, demos, and non-sensitive data.
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .defaults()
+    .client
+```
+
+You can also point it at a specific `UserDefaults` store:
+
+```swift
+let customDefaults = UserDefaults(suiteName: "SwiftRest.example")!
+
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .defaults(customDefaults, key: "auth.session")
+    .client
+```
+
+### Memory only
+
+Best for tests, previews, and temporary sessions.
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .memory()
+    .client
+```
+
+You can also start with an existing session in memory:
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .memory(session: SwiftRestAuthSession(token: "seed-token"))
+    .client
+```
+
+### No persistence
+
+Use this when you do not want SwiftRest to save anything between requests.
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .none()
+    .client
+```
+
+### Custom store
+
+If you want your own storage, conform to `SwiftRestSessionStore`.
+
+```swift
+actor AppSessionStore: SwiftRestSessionStore {
+    private var session: SwiftRestAuthSession?
+
+    func load() async throws -> SwiftRestAuthSession? {
+        session
     }
 
-    func load() async {
-        do {
-            let user: User = try await client.path("users/1").get().value()
-            name = user.firstName
-            errorText = nil
-        } catch let error as SwiftRestClientError {
-            errorText = error.userMessage
-        } catch {
-            errorText = error.localizedDescription
-        }
+    func save(_ session: SwiftRestAuthSession) async throws {
+        self.session = session
+    }
+
+    func clear() async throws {
+        session = nil
     }
 }
+
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .store(AppSessionStore())
+    .client
 ```
 
-## One Request Flow
+## Token Mapping
 
-SwiftRest V4 keeps one request chain with 4 clear outputs.
+SwiftRest does not guess field names. You tell it where your API puts the token values.
 
-```swift
-let value: User = try await client.path("users/1").get().value()
+### Common JSON field names
 
-let response: SwiftRestResponse<User> = try await client.path("users/1").get().response()
-
-try await client.path("users/1").get().send() // success/failure only
-
-let result: SwiftRestResult<User, APIErrorModel> =
-    await client.path("users/1").get().result(error: APIErrorModel.self)
-```
-
-## Chainable Paths (No Manual `/` Needed)
-
-Build paths in small readable segments:
+Most APIs use these names:
 
 ```swift
-let settings: AppSettings = try await client
-    .path("v1")
-    .path("system")
-    .path(sessionId)
-    .path("app-settings")
-    .get()
-    .value()
-```
-
-Variadic helper:
-
-```swift
-let settings: AppSettings = try await client
-    .path("v1")
-    .paths("system", sessionId, "app-settings")
-    .get()
-    .value()
-```
-
-Primitive segments are supported directly:
-
-```swift
-let user: User = try await client
-    .path("v1")
-    .path("users")
-    .path(42)   // Int
-    .get()
-    .value()
-```
-
-You can also append path components from a URL:
-
-```swift
-let source = URL(string: "https://other.host/system/app-settings/88?env=prod")!
-
-let settings: AppSettings = try await client
-    .path("v1")
-    .path(url: source) // appends only /system/app-settings/88
-    .get()
-    .value()
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .tokenField("accessToken")
+    .refreshTokenField("refreshToken")
+    .client
 ```
 
 Notes:
+- `tokenField("accessToken")` means the top-level JSON field must be named `accessToken`.
+- `refreshTokenField("refreshToken")` is optional.
+- If your API does not return a refresh token, leave `refreshTokenField(...)` out.
 
-- You do not need to type `/` between segments.
-- Extra leading/trailing slashes are normalized automatically.
-- If you already have a full path string, `client.path("v1/system/app-settings")` still works.
-- Supported segment types include `String`, `Substring`, all integer types, `Double`, `Float`, `Decimal`, `Bool`, and `UUID`.
+### Different JSON field names
+
+If your API uses other names, just point SwiftRest at them:
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .tokenField("sessionToken")
+    .refreshTokenField("sessionRefreshToken")
+    .client
+```
+
+### Tokens in response headers
+
+If your API returns a token in a header instead of JSON, use `tokenHeader(...)`.
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .tokenHeader("X-Session-Token")
+    .refreshTokenHeader("X-Refresh-Token")
+    .client
+```
+
+Header names are read case-insensitively.
+
+## Login Refresh And Logout
+
+### Login with automatic saving
+
+When the login response contains the token field names you configured, SwiftRest saves them automatically.
+
+```swift
+struct LoginRequest: Encodable, Sendable {
+    let email: String
+    let password: String
+}
+
+struct LoginResponse: Decodable, Sendable {
+    let accessToken: String
+    let refreshToken: String?
+}
+
+let login = LoginRequest(email: "ricky@example.com", password: "secret")
+
+let response: LoginResponse = try await auth
+    .path("v1/auth/login")
+    .noAuth()
+    .post(body: login)
+    .value()
+
+print(response.accessToken)
+```
+
+If you want to check what SwiftRest stored, read the session back:
+
+```swift
+if let session = try await auth.currentSession() {
+    print(session.token ?? "none")
+    print(session.refreshToken ?? "none")
+}
+```
+
+### Refresh after `401`
+
+Add a refresh endpoint when your API can issue a new token automatically.
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .keychain()
+    .refresh(endpoint: "v1/auth/refresh")
+    .tokenField("accessToken")
+    .refreshTokenField("refreshToken")
+    .client
+```
+
+What this means:
+- if a request gets `401`, SwiftRest calls the refresh endpoint once
+- it uses the saved refresh token unless you override it for one request
+- if refresh succeeds, SwiftRest saves the new tokens and retries the original request once
+- if refresh fails, you can log the user out
+
+If your refresh endpoint needs a different request field name, change `requestRefreshField`:
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .refresh(
+        endpoint: "v1/session/refresh",
+        method: .post,
+        requestRefreshField: "sessionRefreshToken",
+        triggerStatusCodes: [401, 403],
+        headers: ["X-App-Version": "5.0.0"]
+    )
+    .client
+```
+
+### Logout
+
+Logging out usually means clearing the stored session.
+
+```swift
+try await auth.logout()
+```
+
+If your server also has a logout endpoint, you can call it and then clear the local session:
+
+```swift
+try await auth
+    .path("v1/auth/logout")
+    .post(body: [String: String]())
+    .send()
+
+try await auth.logout()
+```
+
+### Manual save
+
+If your app already has token values, or if you want to store them yourself, save them directly.
+
+```swift
+try await auth.save(token: "access-token", refreshToken: "refresh-token")
+```
 
 ## Headers Made Easy
 
-### Client default headers (every request)
+### Global headers for auth requests
+
+The auth builder can set default headers for every request.
 
 ```swift
-let client = try SwiftRest
-    .for("https://api.example.com")
-    .header("X-App", "SnookerLive")
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .header("X-App-Version", "5.0.0")
+    .header("X-Platform", "iOS")
+    .client
+```
+
+You can also add several at once:
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
     .headers([
-        "X-Platform": "iOS",
-        "Accept-Language": "en-GB"
+        "X-App-Version": "5.0.0",
+        "X-Platform": "iOS"
     ])
     .client
 ```
 
-### Per-request headers (one call only)
+### Per-request headers
+
+Use request headers when only one call needs something extra.
 
 ```swift
-let result = try await client
-    .path("users/1")
-    .header("X-Trace-Id", UUID().uuidString)
-    .headers(["X-Experiment": "A"])
-    .get()
-    .valueAndHeaders(as: User.self)
-
-print(result.value.firstName)
-print(result.headers["x-request-id"] ?? "missing")
-print(result.headers["x-rate-limit-remaining"] ?? "0")
-```
-
-Header scope recap:
-
-- `.header(...)` or `.headers(...)` on `SwiftRest.for(...). ... .client` sets default headers for every request.
-- `.header(...)` or `.headers(...)` on `client.path(...). ...` applies only to that one request.
-
-## Setup Chain Reference
-
-```swift
-let client = try SwiftRest
-    .for("https://api.example.com")
-    .accessToken("initial-token")
-    .accessTokenProvider { await sessionStore.accessToken }
-    .autoRefresh(
-        endpoint: "auth/refresh",
-        refreshTokenProvider: { await sessionStore.refreshToken },
-        onTokensRefreshed: { accessToken, refreshToken in
-            await sessionStore.setTokens(accessToken: accessToken, refreshToken: refreshToken)
-        }
-    )
-    .json(.webAPI)
-    .jsonDates(.iso8601)
-    .jsonKeys(.snakeCase)
-    .retry(.standard)
-    .timeout(30)
-    .logging(.off)
-    .client
-```
-
-## Auto Refresh (Single Client, Safe)
-
-Auto refresh is built-in and safe for single-client usage.
-
-- On configured auth status codes (default: `401`), SwiftRest refreshes once and retries once.
-- Refresh calls bypass normal auth middleware to avoid recursion.
-- Concurrent auth-failure requests share one refresh (single-flight).
-
-### Beginner mode (endpoint-driven)
-
-Step 1, make a token store:
-
-```swift
-actor SessionStore {
-    private var accessTokenValue: String?
-    private var refreshTokenValue: String?
-
-    var accessToken: String? { accessTokenValue }   // read
-    var refreshToken: String? { refreshTokenValue } // read
-
-    func setAccessToken(_ token: String) {
-        self.accessTokenValue = token
-    }
-
-    func setTokens(accessToken: String, refreshToken: String?) {
-        self.accessTokenValue = accessToken
-        self.refreshTokenValue = refreshToken
-    }
-
-    func clear() {
-        self.accessTokenValue = nil
-        self.refreshTokenValue = nil
-    }
-}
-```
-
-Step 2, configure refresh:
-
-```swift
-let client = try SwiftRest
-    .for("https://api.example.com")
-    .accessTokenProvider { await sessionStore.accessToken }
-    .autoRefresh(
-        endpoint: "auth/refresh",
-        refreshTokenProvider: { await sessionStore.refreshToken },
-        refreshTokenField: "refreshToken",
-        tokenField: "accessToken",
-        refreshTokenResponseField: "refreshToken",
-        triggerStatusCodes: [401],
-        onTokensRefreshed: { accessToken, refreshToken in
-            await sessionStore.setTokens(accessToken: accessToken, refreshToken: refreshToken)
-        }
-    )
-    .client
-```
-
-Providers can also be simple closures when values are already available:
-
-```swift
-.accessTokenProvider { "token-value" }
-.autoRefresh(endpoint: "auth/refresh", refreshTokenProvider: { "refresh-value" })
-```
-
-What each setting does:
-
-- `accessTokenProvider`: reads your current access token before requests.
-- `refreshTokenProvider`: reads your current refresh token when a `401` happens.
-- `refreshTokenField`: JSON key sent to refresh endpoint in request body.
-- `tokenField`: JSON key read from refresh response for the new access token.
-- `refreshTokenResponseField`: optional key read from refresh response for rotated refresh token.
-- `triggerStatusCodes`: status codes that should trigger refresh (default is `[401]`).
-- `onTokensRefreshed`: callback to save refreshed token values to your store/keychain.
-
-Example refresh response:
-
-```json
-{
-  "accessToken": "...",
-  "accessTokenExpiresUtc": "2026-02-18T23:10:04.5435334Z",
-  "refreshToken": "...",
-  "refreshTokenExpiresUtc": "2026-03-20T22:50:04.5435334Z",
-  "tokenType": "Bearer"
-}
-```
-
-Matching config for that response:
-
-```swift
-.autoRefresh(
-    endpoint: "auth/refresh",
-    refreshTokenProvider: { await sessionStore.refreshToken },
-    refreshTokenField: "refreshToken",
-    tokenField: "accessToken",
-    refreshTokenResponseField: "refreshToken"
-)
-```
-
-If your API uses different names, set exact key names:
-
-```swift
-.autoRefresh(
-    endpoint: "auth/refresh",
-    refreshTokenProvider: { await sessionStore.refreshToken },
-    refreshTokenField: "refresh_token",
-    tokenField: "token",
-    refreshTokenResponseField: "refresh_token",
-    triggerStatusCodes: [401, 403]
-)
-```
-
-### Advanced mode (custom refresh logic with safe bypass context)
-
-```swift
-struct RefreshTokenBody: Encodable, Sendable {
-    let refreshToken: String
-}
-
-struct RefreshTokenResponse: Decodable, Sendable {
-    let accessToken: String
-}
-
-let refresh = SwiftRestAuthRefresh.custom { refresh in
-    let dto: RefreshTokenResponse = try await refresh.post(
-        "auth/refresh",
-        body: RefreshTokenBody(refreshToken: await sessionStore.refreshToken)
-    )
-    await sessionStore.setAccessToken(dto.accessToken)
-    return dto.accessToken
-}.triggerStatusCodes([401, 403])
-
-let client = try SwiftRest
-    .for("https://api.example.com")
-    .accessTokenProvider { await sessionStore.accessToken }
-    .autoRefresh(refresh)
-    .client
-```
-
-### If refresh fails: clear tokens and log out
-
-```swift
-do {
-    let profile: User = try await client.path("secure/profile").get().value()
-    print(profile.firstName)
-} catch let error as SwiftRestClientError {
-    switch error {
-    case .authRefreshFailed:
-        await sessionStore.clear()
-        // Route user to login screen
-    case .httpError(let details) where [401, 403].contains(details.statusCode):
-        await sessionStore.clear()
-        // Route user to login screen
-    default:
-        print(error.userMessage)
-    }
-}
-```
-
-## Per-Request Auth Overrides
-
-Use these when one call needs different auth behavior.
-
-```swift
-let user: User = try await client
-    .path("users/1")
-    .authToken("one-off-token") // per-request access token
+let profile: User = try await auth
+    .path("v1/me")
+    .header("X-Trace-ID", UUID().uuidString)
     .get()
     .value()
 ```
 
-```swift
-let publicInfo: PublicInfo = try await client
-    .path("public/info")
-    .noAuth() // skips Authorization header for this call
-    .get()
-    .value()
-```
+### Reading response headers
+
+There are two easy ways to read headers back.
+
+#### Option 1: decode the value and keep the headers
 
 ```swift
-let raw = try await client
-    .path("secure/profile")
-    .autoRefresh(false) // skip auth refresh for this call
+let (user, headers) = try await auth
+    .path("v1/users/1")
+    .get()
+    .valueAndHeaders()
+
+print(user.firstName)
+print(headers["x-request-id"] ?? "none")
+```
+
+#### Option 2: inspect the full response object
+
+```swift
+let response: SwiftRestResponse<User> = try await auth
+    .path("v1/users/1")
+    .get()
+    .response()
+
+print(response.statusCode)
+print(response.data?.firstName ?? "none")
+print(response.header("x-request-id") ?? "none")
+print(response.headerInt("x-total-count") ?? 0)
+```
+
+### Raw response when you only want status and headers
+
+This is useful when you want to inspect a `401`, `404`, or any other HTTP response directly.
+
+```swift
+let raw = try await auth
+    .path("v1/users/1")
     .get()
     .raw()
 
 print(raw.statusCode)
+print(raw.header("x-request-id") ?? "none")
+print(raw.rawValue ?? "no body")
 ```
 
+## Paths And Query
+
+### Chainable path segments
+
+You do not need to add `/` between path segments. SwiftRest joins them for you.
+
 ```swift
-let user: User = try await client
-    .path("secure/profile")
-    .refreshTokenProvider { await sessionStore.temporaryRefreshToken }
+let user: User = try await auth
+    .path("v1")
+    .path("users")
+    .path(42)
     .get()
     .value()
 ```
 
-`refreshTokenProvider` above is only used if that call hits `401` and refresh is enabled on the client.
+Supported path segment types include:
+- `String`
+- `Substring`
+- all integer types
+- `Double`
+- `Float`
+- `Decimal`
+- `Bool`
+- `UUID`
 
-## HTTP Methods (All Supported)
+You can also append several segments at once:
 
 ```swift
-// GET
-let users: [User] = try await client.path("users").get().value()
-
-// POST
-let created: User = try await client
-    .path("users")
-    .post(body: CreateUser(firstName: "Ricky"))
+let user: User = try await auth
+    .path("v1")
+    .paths("users", 42, UUID(uuidString: "D2719D2A-E7DE-48E1-A5FD-2241F0587B37")!)
+    .get()
     .value()
-
-// PUT
-let updated: User = try await client
-    .path("users/1")
-    .put(body: CreateUser(firstName: "Ricky Stone"))
-    .value()
-
-// PATCH
-let patched: User = try await client
-    .path("users/1")
-    .patch(body: ["firstName": "Ricky S."])
-    .value()
-
-// DELETE (success/no payload style)
-let deleted = try await client.path("users/1").delete().raw()
-print(deleted.isSuccess)
-
-// HEAD
-let head = try await client.path("users/1").head().raw()
-print(head.statusCode)
-print(head.header("etag") ?? "missing")
-
-// OPTIONS
-let options = try await client.path("users").options().raw()
-print(options.header("allow") ?? "missing")
 ```
 
-## Query and Body Models
+If you already have a full URL path, you can append that too:
 
-### Query model
+```swift
+let raw = try await auth
+    .path(url: URL(string: "/v1/users/42")!)
+    .get()
+    .raw()
+```
+
+### Query with a model
+
+Use a model when you want strongly-typed query parameters.
 
 ```swift
 struct UserQuery: Encodable, Sendable {
@@ -483,8 +584,8 @@ struct UserQuery: Encodable, Sendable {
     let includeInactive: Bool
 }
 
-let users: [User] = try await client
-    .path("users")
+let users: [User] = try await auth
+    .path("v1/users")
     .query(UserQuery(page: 1, search: "ricky", includeInactive: false))
     .get()
     .value()
@@ -492,23 +593,11 @@ let users: [User] = try await client
 
 ### Query without a model
 
-```swift
-let users: [User] = try await client
-    .path("users")
-    .parameters([
-        "page": "1",
-        "search": "ricky",
-        "includeInactive": "false"
-    ])
-    .get()
-    .value()
-```
-
-Single key style:
+If you only need a few query values, use `parameter(...)` or `parameters(...)`.
 
 ```swift
-let users: [User] = try await client
-    .path("users")
+let users: [User] = try await auth
+    .path("v1/users")
     .parameter("page", "1")
     .parameter("search", "ricky")
     .parameter("includeInactive", "false")
@@ -516,243 +605,215 @@ let users: [User] = try await client
     .value()
 ```
 
-### POST model body
+## HTTP Methods
+
+SwiftRest supports all the common HTTP methods on the request chain.
+
+### GET
+
+```swift
+let user: User = try await auth.path("users/1").get().value()
+```
+
+### POST
 
 ```swift
 struct CreateUser: Encodable, Sendable {
-    let firstName: String
+    let name: String
 }
 
-let created: User = try await client
+let created: User = try await auth
     .path("users")
-    .post(body: CreateUser(firstName: "Ricky"))
+    .post(body: CreateUser(name: "Ricky"))
     .value()
 ```
 
-### Success-only call (no model needed)
+### PUT
 
 ```swift
-try await client
+let updated: User = try await auth
+    .path("users/1")
+    .put(body: CreateUser(name: "Ricky Stone"))
+    .value()
+```
+
+### PATCH
+
+```swift
+let patched: User = try await auth
+    .path("users/1")
+    .patch(body: ["name": "Ricky S."])
+    .value()
+```
+
+### DELETE
+
+If you only care whether it worked, use `send()`.
+
+```swift
+try await auth
     .path("users/1")
     .delete()
     .send()
 ```
 
-If you want to inspect status/headers instead:
+### HEAD
 
 ```swift
-let raw = try await client
-    .path("users/1")
-    .delete()
+let health = try await auth
+    .path("health")
+    .head()
     .raw()
 
-if raw.isSuccess {
-    print("Delete worked")
-}
+print(health.statusCode)
 ```
 
-Logout example:
+### OPTIONS
 
 ```swift
-func logout(_ request: LogoutRequest) async throws {
-    try await client
-        .path("v1/auth/logout")
-        .post(body: request)
-        .send()
-}
-```
-
-### Multipart upload (manual raw request)
-
-```swift
-let boundary = "Boundary-\(UUID().uuidString)"
-var body = Data()
-
-func append(_ string: String) {
-    body.append(Data(string.utf8))
-}
-
-append("--\(boundary)\r\n")
-append("Content-Disposition: form-data; name=\"file\"; filename=\"avatar.jpg\"\r\n")
-append("Content-Type: image/jpeg\r\n\r\n")
-body.append(fileData) // Data loaded from disk/camera
-append("\r\n--\(boundary)--\r\n")
-
-let request = SwiftRestRequest(path: "uploads/avatar", method: .post)
-    .header("Content-Type", "multipart/form-data; boundary=\(boundary)")
-    .rawBody(body)
-
-let upload = try await client.executeRaw(request)
-print(upload.statusCode)
-```
-
-### Value + headers together
-
-```swift
-let result = try await client
-    .path("users/1")
-    .get()
-    .valueAndHeaders(as: User.self)
-
-print(result.value.firstName)
-print(result.headers["x-request-id"] ?? "missing")
-```
-
-### Pagination with headers
-
-```swift
-let firstPage: SwiftRestResponse<[User]> = try await client
+let options = try await auth
     .path("users")
-    .parameters(["page": "1", "pageSize": "20"])
-    .get()
-    .response()
+    .options()
+    .raw()
 
-let users = firstPage.data ?? []
-let nextPage = firstPage.header("x-next-page")
+print(options.header("allow") ?? "none")
+```
 
-if let nextPage {
-    let secondPage: [User] = try await client
-        .path("users")
-        .parameters(["page": nextPage, "pageSize": "20"])
+## JSON Options
+
+SwiftRest gives you a few ways to choose JSON behavior without making the call site noisy.
+
+### Common web API preset
+
+If your API uses snake_case keys and ISO8601 dates, this is the quickest start:
+
+```swift
+let client = SwiftRest.client(baseURL: apiURL, config: .webAPI)
+```
+
+### ISO8601 dates only
+
+```swift
+let client = SwiftRest.client(
+    baseURL: apiURL,
+    config: SwiftRestConfig.standard.jsonCoding(.iso8601)
+)
+```
+
+### Dates and keys separately
+
+For more control, set dates and keys independently.
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .jsonDates(.iso8601WithFractionalSeconds)
+    .jsonKeys(.snakeCaseDecodingOnly)
+    .client
+```
+
+### Other useful presets
+
+You can also use these common presets directly:
+- `SwiftRestJSONCoding.iso8601`
+- `SwiftRestJSONCoding.webAPI`
+- `SwiftRestJSONCoding.webAPIFractionalSeconds`
+- `SwiftRestJSONCoding.webAPIUnixSeconds`
+- `SwiftRestJSONCoding.webAPIUnixMilliseconds`
+
+And these key modes:
+- `SwiftRestJSONKeys.useDefaultKeys`
+- `SwiftRestJSONKeys.snakeCase`
+- `SwiftRestJSONKeys.snakeCaseDecodingOnly`
+- `SwiftRestJSONKeys.snakeCaseEncodingOnly`
+
+## Error Handling
+
+All request methods throw, so beginners can start with `do/catch` and advanced users can branch on the specific error.
+
+```swift
+do {
+    let profile: User = try await auth
+        .path("v1/me")
         .get()
         .value()
-    print("Loaded \(secondPage.count) more users")
+    print(profile.firstName)
+} catch let error as SwiftRestClientError {
+    print(error.localizedDescription)
+} catch {
+    print(error.localizedDescription)
 }
 ```
 
-## JSON Options (Flexible)
-
-### Common presets
+If you only care about success or failure, `send()` is the simplest path.
 
 ```swift
-.json(.default) // Foundation defaults
-.json(.iso8601) // default keys + ISO8601 dates
-.json(.webAPI)  // snake_case keys + ISO8601 dates
-
-// extra web API presets
-.json(.webAPIFractionalSeconds) // snake_case + ISO8601 fractional seconds
-.json(.webAPIUnixSeconds)       // snake_case + Unix seconds
-.json(.webAPIUnixMilliseconds)  // snake_case + Unix milliseconds
+try await auth
+    .path("v1/auth/logout")
+    .post(body: [String: String]())
+    .send()
 ```
 
-### Key strategies
+If you need to inspect a status code without throwing on HTTP errors, use `raw()`.
 
 ```swift
-.jsonKeys(.useDefaultKeys)         // decode+encode default keys
-.jsonKeys(.snakeCase)              // decode+encode snake_case
-.jsonKeys(.snakeCaseDecodingOnly)  // decode snake_case, encode default keys
-.jsonKeys(.snakeCaseEncodingOnly)  // decode default keys, encode snake_case
-```
-
-### Date strategies
-
-```swift
-.jsonDates(.iso8601)
-.jsonDates(.iso8601WithFractionalSeconds)
-.jsonDates(.secondsSince1970)
-.jsonDates(.millisecondsSince1970)
-.jsonDates(.formatted(format: "yyyy-MM-dd HH:mm:ss"))
-```
-
-### Per-request overrides
-
-```swift
-let config: AppConfig = try await client
-    .path("app-config")
-    .jsonDates(.iso8601)
-    .jsonKeys(.useDefaultKeys)
+let raw = try await auth
+    .path("v1/me")
     .get()
-    .value()
-```
+    .raw()
 
-## Result-Style API
-
-Result-style calls are great for UI state management.
-
-```swift
-struct APIErrorModel: Decodable, Sendable {
-    let message: String
-    let code: String?
-}
-
-let result: SwiftRestResult<User, APIErrorModel> =
-    await client.path("users/1").get().result(error: APIErrorModel.self)
-
-switch result {
-case .success(let response):
-    print(response.value?.firstName ?? "none")
-
-case .apiError(let decoded, let raw):
-    print(raw.statusCode)
-    print(decoded?.message ?? "Unknown API error")
-
-case .failure(let error):
-    print(error.userMessage)
+if raw.statusCode == 401 {
+    try await auth.logout()
 }
 ```
 
-## Debug Logging
+## SwiftUI Example
+
+This is a simple SwiftUI pattern that loads a profile after login.
 
 ```swift
-let client = try SwiftRest
-    .for("https://api.example.com")
-    .logging(.headers)
-    .client
+import SwiftUI
+import SwiftRest
+
+struct Profile: Decodable, Sendable {
+    let firstName: String
+}
+
+struct ProfileView: View {
+    let auth: SwiftRestAuthClient
+    @State private var profile: Profile?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(spacing: 16) {
+            if let profile {
+                Text(profile.firstName)
+            } else if let errorMessage {
+                Text(errorMessage)
+            } else {
+                ProgressView()
+            }
+        }
+        .task {
+            do {
+                profile = try await auth
+                    .path("v1/me")
+                    .get()
+                    .value()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+}
 ```
 
-Modes:
+## Acknowledgements
 
-- `.logging(.off)` or `.logging(.disabled)`
-- `.logging(.basic)`
-- `.logging(.headers)`
+Keychain storage in SwiftRest is powered by [SwiftKey](https://github.com/ricky-stone/SwiftKey).
 
-Sensitive headers are redacted automatically.
-
-## Retry Policy
-
-```swift
-let client = try SwiftRest
-    .for("https://api.example.com")
-    .retry(
-        RetryPolicy(
-            maxAttempts: 4,
-            baseDelay: 0.4,
-            backoffMultiplier: 2,
-            maxDelay: 5
-        )
-    )
-    .client
-```
-
-## Migration (V3 -> V4)
-
-V4 preferred style:
-
-- Setup: `SwiftRest.for(...). ... .client`
-- Requests: `client.path(...).verb().value/response/result`
-
-Legacy V3-style convenience methods on `SwiftRestClient` are now deprecated and show migration warnings.
-
-You can still keep your models (`Decodable & Sendable`, `Encodable & Sendable`) the same.
+Special thanks to Ricky Stone for the SwiftKey library that supports the Keychain preset.
 
 ## License
 
-SwiftRest is licensed under the MIT License. See `LICENSE.txt`.
-
-Industry standard for MIT:
-
-- You can use this in commercial/private/open-source projects.
-- Keep the copyright + license notice when redistributing.
-- Attribution is appreciated but not required by MIT.
-
-## Author
-
-Created and maintained by Ricky Stone.
-
-## Acknowledgments
-
-Thanks to everyone who tests, reports issues, and contributes improvements.
-
-## Version
-
-Current source version marker: `SwiftRestVersion.current == "4.8.0"`
+SwiftRest is released under the MIT License. See [`LICENSE.txt`](LICENSE.txt).

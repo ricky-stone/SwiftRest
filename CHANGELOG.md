@@ -1,5 +1,48 @@
 # Changelog
 
+## 5.0.0 - 2026-03-23
+
+### Added
+- New beginner-first plain client factory:
+  - `SwiftRest.client(baseURL:config:session:)`
+  - No `try` required for the normal URL-based setup path.
+- New beginner-first auth/session wrapper:
+  - `SwiftRest.auth(baseURL:config:session:)`
+  - `SwiftRestAuthClient`
+  - `SwiftRestAuthSession`
+  - `SwiftRestSessionStore`
+- Built-in session storage presets:
+  - `.keychain()` backed by SwiftKey
+  - `.defaults()`
+  - `.memory()`
+  - `.none()`
+  - `.store(...)` for custom storage
+- Token mapping helpers for both JSON body fields and response headers:
+  - `.tokenField(...)`
+  - `.tokenHeader(...)`
+  - `.refreshTokenField(...)`
+  - `.refreshTokenHeader(...)`
+- Auth refresh configuration with simple recovery flow:
+  - `.refresh(endpoint:method:requestRefreshField:triggerStatusCodes:headers:)`
+  - automatic save + retry after refresh success
+- Auth session helpers:
+  - `currentSession()`
+  - `session()`
+  - `save(token:refreshToken:)`
+  - `logout()`
+- Beginner-friendly auth request chain with:
+  - `.noAuth()`
+  - `.authToken(...)`
+  - `.valueAndHeaders(...)`
+  - `.raw()`
+  - `.send()`
+- README rewritten around the new v5 beginner-first flow, with plain Swift and SwiftUI examples.
+
+### Changed
+- SwiftRest v5 now focuses docs on the new auth/session wrapper instead of the older auth-refresh configuration style.
+- Keychain storage is now presented as the default beginner path.
+- Version marker updated to `5.0.0`.
+
 ## 4.8.0 - 2026-02-19
 
 ### Added

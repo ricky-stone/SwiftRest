@@ -265,6 +265,130 @@ private final class RefreshForbiddenAuthURLProtocol: URLProtocol, @unchecked Sen
     override func stopLoading() {}
 }
 
+private final class AuthSessionState: @unchecked Sendable {
+    static let shared = AuthSessionState()
+
+    private let lock = NSLock()
+    private var authHeadersByPath: [String: [String]] = [:]
+
+    func reset() {
+        lock.lock()
+        authHeadersByPath = [:]
+        lock.unlock()
+    }
+
+    func record(path: String, authHeader: String) {
+        lock.lock()
+        authHeadersByPath[path, default: []].append(authHeader)
+        lock.unlock()
+    }
+
+    func snapshot() -> [String: [String]] {
+        lock.lock()
+        defer { lock.unlock() }
+        return authHeadersByPath
+    }
+}
+
+private final class AuthSessionURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+
+        let authHeader = request.value(forHTTPHeaderField: "Authorization") ?? "none"
+        AuthSessionState.shared.record(path: url.path, authHeader: authHeader)
+
+        switch url.path {
+        case "/auth/login":
+            respond(
+                url: url,
+                statusCode: 200,
+                headers: ["Content-Type": "application/json"],
+                body: #"{"accessToken":"fresh-token","refreshToken":"fresh-refresh-token"}"#
+            )
+        case "/auth/header-login":
+            respond(
+                url: url,
+                statusCode: 200,
+                headers: [
+                    "X-Session-Token": "header-token",
+                    "X-Refresh-Token": "header-refresh-token"
+                ],
+                body: ""
+            )
+        case "/auth/refresh":
+            respond(
+                url: url,
+                statusCode: 200,
+                headers: ["Content-Type": "application/json"],
+                body: #"{"accessToken":"fresh-token"}"#
+            )
+        case "/secure/profile":
+            if authHeader == "Bearer fresh-token" {
+                respond(
+                    url: url,
+                    statusCode: 200,
+                    headers: ["Content-Type": "application/json"],
+                    body: #"{"id":1,"name":"Alice"}"#
+                )
+            } else {
+                respond(
+                    url: url,
+                    statusCode: 401,
+                    headers: ["Content-Type": "application/json"],
+                    body: #"{"message":"Unauthorized"}"#
+                )
+            }
+        default:
+            respond(
+                url: url,
+                statusCode: 404,
+                headers: ["Content-Type": "application/json"],
+                body: #"{"message":"Not found"}"#
+            )
+        }
+    }
+
+    override func stopLoading() {}
+
+    private func respond(
+        url: URL,
+        statusCode: Int,
+        headers: [String: String],
+        body: String
+    ) {
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: statusCode,
+            httpVersion: nil,
+            headerFields: headers
+        )!
+
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
+private struct AuthLoginRequest: Encodable, Sendable {
+    let email: String
+}
+
+private struct AuthLoginResponse: Decodable, Sendable, Equatable {
+    let accessToken: String
+    let refreshToken: String?
+}
+
 private final class EndpointRefreshState: @unchecked Sendable {
     static let shared = EndpointRefreshState()
 
@@ -891,6 +1015,152 @@ private actor RefreshedTokensSink {
     #expect(requestTokenNoAuthRaw.header("x-observed-authorization") == "none")
 }
 
+@Test func testV5PlainClientFactoryUsesURLWithoutTry() async throws {
+    let sessionConfiguration = URLSessionConfiguration.ephemeral
+    sessionConfiguration.protocolClasses = [SimpleSuccessURLProtocol.self]
+    let session = URLSession(configuration: sessionConfiguration)
+
+    let client = SwiftRest.client(
+        baseURL: URL(string: "https://api.example.com")!,
+        session: session
+    )
+
+    let raw = try await client.path("users/1").get().raw()
+    #expect(raw.statusCode == 200)
+}
+
+@Test func testV5AuthLoginAutoSavesSessionAndReusesIt() async throws {
+    AuthSessionState.shared.reset()
+
+    let sessionConfiguration = URLSessionConfiguration.ephemeral
+    sessionConfiguration.protocolClasses = [AuthSessionURLProtocol.self]
+    let session = URLSession(configuration: sessionConfiguration)
+
+    let auth = SwiftRest
+        .auth(baseURL: URL(string: "https://api.example.com")!)
+        .memory()
+        .refresh(endpoint: "auth/refresh")
+        .tokenField("accessToken")
+        .refreshTokenField("refreshToken")
+        .session(session)
+        .client
+
+    let login: AuthLoginResponse = try await auth
+        .path("auth/login")
+        .noAuth()
+        .post(body: AuthLoginRequest(email: "ricky@example.com"))
+        .value()
+
+    #expect(login == AuthLoginResponse(accessToken: "fresh-token", refreshToken: "fresh-refresh-token"))
+
+    let saved = try await auth.session()
+    #expect(saved == SwiftRestAuthSession(token: "fresh-token", refreshToken: "fresh-refresh-token"))
+
+    let profile: Dummy = try await auth.path("secure/profile").get().value()
+    #expect(profile == Dummy(id: 1, name: "Alice"))
+
+    let snapshot = AuthSessionState.shared.snapshot()
+    #expect(snapshot["/auth/login"]?.first == "none")
+    #expect(snapshot["/secure/profile"]?.last == "Bearer fresh-token")
+}
+
+@Test func testV5AuthClientCanReadTokensFromHeaders() async throws {
+    AuthSessionState.shared.reset()
+
+    let sessionConfiguration = URLSessionConfiguration.ephemeral
+    sessionConfiguration.protocolClasses = [AuthSessionURLProtocol.self]
+    let session = URLSession(configuration: sessionConfiguration)
+
+    let auth = SwiftRest
+        .auth(baseURL: URL(string: "https://api.example.com")!)
+        .memory()
+        .tokenHeader("X-Session-Token")
+        .refreshTokenHeader("X-Refresh-Token")
+        .session(session)
+        .client
+
+    try await auth
+        .path("auth/header-login")
+        .noAuth()
+        .get()
+        .send()
+
+    let saved = try await auth.session()
+    #expect(saved == SwiftRestAuthSession(token: "header-token", refreshToken: "header-refresh-token"))
+
+    let snapshot = AuthSessionState.shared.snapshot()
+    #expect(snapshot["/auth/header-login"]?.first == "none")
+}
+
+@Test func testV5AuthClientRefreshesStoredSessionAfter401() async throws {
+    AuthSessionState.shared.reset()
+
+    let sessionConfiguration = URLSessionConfiguration.ephemeral
+    sessionConfiguration.protocolClasses = [AuthSessionURLProtocol.self]
+    let session = URLSession(configuration: sessionConfiguration)
+
+    let auth = SwiftRest
+        .auth(baseURL: URL(string: "https://api.example.com")!)
+        .memory()
+        .refresh(endpoint: "auth/refresh")
+        .tokenField("accessToken")
+        .session(session)
+        .client
+
+    try await auth.save(token: "expired-token", refreshToken: "refresh-token")
+
+    let profile: Dummy = try await auth.path("secure/profile").get().value()
+    #expect(profile == Dummy(id: 1, name: "Alice"))
+
+    let saved = try await auth.session()
+    #expect(saved == SwiftRestAuthSession(token: "fresh-token", refreshToken: "refresh-token"))
+
+    let snapshot = AuthSessionState.shared.snapshot()
+    #expect(snapshot["/secure/profile"]?.first == "Bearer expired-token")
+    #expect(snapshot["/secure/profile"]?.last == "Bearer fresh-token")
+    #expect(snapshot["/auth/refresh"]?.first == "none")
+}
+
+@Test func testV5DefaultsSessionStoreRoundTrip() async throws {
+    let defaults = UserDefaults(suiteName: "SwiftRestTests.\(UUID().uuidString)")!
+    let store = SwiftRestDefaultsSessionStore(defaults: defaults, key: "session")
+    let session = SwiftRestAuthSession(token: "default-token", refreshToken: "default-refresh")
+
+    try await store.save(session)
+    let loaded = try await store.load()
+    #expect(loaded == session)
+
+    try await store.clear()
+    #expect(try await store.load() == nil)
+}
+
+@Test func testV5MemorySessionStoreRoundTrip() async throws {
+    let store = SwiftRestMemorySessionStore()
+    let session = SwiftRestAuthSession(token: "memory-token", refreshToken: "memory-refresh")
+
+    try await store.save(session)
+    let loaded = try await store.load()
+    #expect(loaded == session)
+
+    try await store.clear()
+    #expect(try await store.load() == nil)
+}
+
+@Test func testV5KeychainSessionStoreRoundTrip() async throws {
+    let store = SwiftRestKeychainSessionStore(
+        service: "SwiftRestTests.\(UUID().uuidString)",
+        key: "session"
+    )
+    let session = SwiftRestAuthSession(token: "keychain-token", refreshToken: "keychain-refresh")
+
+    try await store.save(session)
+    let loaded = try await store.load()
+    #expect(loaded == session)
+
+    try await store.clear()
+    #expect(try await store.load() == nil)
+}
+
 @Test func testV4ChainBuilderAndRequestOutputs() async throws {
     let sessionConfiguration = URLSessionConfiguration.ephemeral
     sessionConfiguration.protocolClasses = [ResultScenarioURLProtocol.self]
@@ -1485,7 +1755,7 @@ private actor RefreshedTokensSink {
     )
     #expect(SwiftRestConfig.standard.debugLogging.isEnabled == false)
     #expect(SwiftRestConfig.standard.authRefresh.isEnabled == false)
-    #expect(SwiftRestVersion.current == "4.8.0")
+    #expect(SwiftRestVersion.current == "5.0.0")
 
     _ = try SwiftRestClient("https://api.example.com")
 }
