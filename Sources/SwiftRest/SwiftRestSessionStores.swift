@@ -1,5 +1,5 @@
 import Foundation
-import SwiftKey
+import Security
 
 /// An in-memory auth session store.
 public actor SwiftRestMemorySessionStore: SwiftRestSessionStore {
@@ -78,52 +78,112 @@ public actor SwiftRestNullSessionStore: SwiftRestSessionStore {
     public func clear() async throws {}
 }
 
-/// A Keychain-backed auth session store using SwiftKey.
+/// A Keychain-backed auth session store.
 public actor SwiftRestKeychainSessionStore: SwiftRestSessionStore {
-    private let keychain: SwiftKey.Beginner
+    private let service: String
     private let key: String
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
 
     public init(
         service: String? = nil,
         key: String = "SwiftRest.auth.session"
     ) {
-        let configuration = SwiftKeyConfiguration(service: service ?? SwiftKey.defaultService)
-        self.keychain = SwiftKey.Beginner(store: SwiftKey(configuration: configuration))
+        self.service = service ?? Bundle.main.bundleIdentifier ?? "SwiftRest"
         self.key = key
     }
 
     public func load() async throws -> SwiftRestAuthSession? {
-        let session = keychain.getModel(key, as: SwiftRestAuthSession.self)
-        if session == nil, let message = keychain.lastErrorMessage {
-            throw SwiftRestClientError.authSessionStoreFailed(
-                underlying: ErrorContext(description: message)
-            )
+        var query = baseQuery()
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+
+        switch status {
+        case errSecSuccess:
+            guard let data = item as? Data else {
+                throw storeFailure(
+                    error: NSError(
+                        domain: "SwiftRestKeychainSessionStore",
+                        code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "Keychain returned data in an unexpected format."]
+                    )
+                )
+            }
+
+            do {
+                return try decoder.decode(SwiftRestAuthSession.self, from: data)
+            } catch {
+                throw storeFailure(error: error)
+            }
+
+        case errSecItemNotFound:
+            return nil
+
+        default:
+            throw storeFailure(status: status, operation: "load")
         }
-        return session
     }
 
     public func save(_ session: SwiftRestAuthSession) async throws {
         if session.isEmpty {
-            _ = keychain.remove(key)
+            try await clear()
             return
         }
 
-        guard keychain.setModel(key, session) else {
-            throw SwiftRestClientError.authSessionStoreFailed(
-                underlying: ErrorContext(
-                    description: keychain.lastErrorMessage ?? "Unable to save auth session."
-                )
-            )
+        let data = try encoder.encode(session)
+        var addQuery = baseQuery()
+        addQuery[kSecValueData as String] = data
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+
+        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+        if addStatus == errSecSuccess {
+            return
+        }
+
+        guard addStatus == errSecDuplicateItem else {
+            throw storeFailure(status: addStatus, operation: "save")
+        }
+
+        let updateStatus = SecItemUpdate(
+            baseQuery() as CFDictionary,
+            [kSecValueData as String: data] as CFDictionary
+        )
+
+        guard updateStatus == errSecSuccess else {
+            throw storeFailure(status: updateStatus, operation: "update")
         }
     }
 
     public func clear() async throws {
-        guard keychain.remove(key) || keychain.lastErrorMessage == nil else {
-            throw SwiftRestClientError.authSessionStoreFailed(
-                underlying: ErrorContext(
-                    description: keychain.lastErrorMessage ?? "Unable to clear auth session."
-                )
-            )
+        let status = SecItemDelete(baseQuery() as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw storeFailure(status: status, operation: "clear")
         }
+    }
+
+    private func baseQuery() -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key
+        ]
+    }
+
+    private func storeFailure(status: OSStatus, operation: String) -> SwiftRestClientError {
+        let description = keychainMessage(for: status, operation: operation)
+        return .authSessionStoreFailed(underlying: ErrorContext(description: description))
+    }
+
+    private func storeFailure(error: Error) -> SwiftRestClientError {
+        .authSessionStoreFailed(underlying: ErrorContext(error))
+    }
+
+    private func keychainMessage(for status: OSStatus, operation: String) -> String {
+        let message = SecCopyErrorMessageString(status, nil) as String?
+        let statusText = message ?? "OSStatus \(status)"
+        return "Keychain \(operation) failed: \(statusText)"
     }
 }

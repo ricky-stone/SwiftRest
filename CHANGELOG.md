@@ -1,5 +1,11 @@
 # Changelog
 
+## 5.0.1 - 2026-03-23
+
+### Fixed
+- Replaced the external SwiftKey package dependency with a built-in Keychain session store so the package builds on the GitHub Actions Swift 6.0 runner.
+- Updated the README and public comments to describe the built-in Keychain preset correctly.
+
 ## 5.0.0 - 2026-03-23
 
 ### Added

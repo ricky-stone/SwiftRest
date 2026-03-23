@@ -308,15 +308,15 @@ private final class AuthSessionURLProtocol: URLProtocol, @unchecked Sendable {
         let authHeader = request.value(forHTTPHeaderField: "Authorization") ?? "none"
         AuthSessionState.shared.record(path: url.path, authHeader: authHeader)
 
-        switch url.path {
-        case "/auth/login":
+        switch true {
+        case url.path.hasSuffix("/auth/login"):
             respond(
                 url: url,
                 statusCode: 200,
                 headers: ["Content-Type": "application/json"],
                 body: #"{"accessToken":"fresh-token","refreshToken":"fresh-refresh-token"}"#
             )
-        case "/auth/header-login":
+        case url.path.hasSuffix("/auth/header-login"):
             respond(
                 url: url,
                 statusCode: 200,
@@ -326,14 +326,14 @@ private final class AuthSessionURLProtocol: URLProtocol, @unchecked Sendable {
                 ],
                 body: ""
             )
-        case "/auth/refresh":
+        case url.path.hasSuffix("/auth/refresh"):
             respond(
                 url: url,
                 statusCode: 200,
                 headers: ["Content-Type": "application/json"],
                 body: #"{"accessToken":"fresh-token"}"#
             )
-        case "/secure/profile":
+        case url.path.hasSuffix("/secure/profile"):
             if authHeader == "Bearer fresh-token" {
                 respond(
                     url: url,
@@ -1030,11 +1030,10 @@ private actor RefreshedTokensSink {
 }
 
 @Test func testV5AuthLoginAutoSavesSessionAndReusesIt() async throws {
-    AuthSessionState.shared.reset()
-
     let sessionConfiguration = URLSessionConfiguration.ephemeral
     sessionConfiguration.protocolClasses = [AuthSessionURLProtocol.self]
     let session = URLSession(configuration: sessionConfiguration)
+    let pathPrefix = "/login-\(UUID().uuidString)"
 
     let auth = SwiftRest
         .auth(baseURL: URL(string: "https://api.example.com")!)
@@ -1046,7 +1045,7 @@ private actor RefreshedTokensSink {
         .client
 
     let login: AuthLoginResponse = try await auth
-        .path("auth/login")
+        .path("\(pathPrefix)/auth/login")
         .noAuth()
         .post(body: AuthLoginRequest(email: "ricky@example.com"))
         .value()
@@ -1056,20 +1055,19 @@ private actor RefreshedTokensSink {
     let saved = try await auth.session()
     #expect(saved == SwiftRestAuthSession(token: "fresh-token", refreshToken: "fresh-refresh-token"))
 
-    let profile: Dummy = try await auth.path("secure/profile").get().value()
+    let profile: Dummy = try await auth.path("\(pathPrefix)/secure/profile").get().value()
     #expect(profile == Dummy(id: 1, name: "Alice"))
 
     let snapshot = AuthSessionState.shared.snapshot()
-    #expect(snapshot["/auth/login"]?.first == "none")
-    #expect(snapshot["/secure/profile"]?.last == "Bearer fresh-token")
+    #expect(snapshot["\(pathPrefix)/auth/login"]?.first == "none")
+    #expect(snapshot["\(pathPrefix)/secure/profile"]?.last == "Bearer fresh-token")
 }
 
 @Test func testV5AuthClientCanReadTokensFromHeaders() async throws {
-    AuthSessionState.shared.reset()
-
     let sessionConfiguration = URLSessionConfiguration.ephemeral
     sessionConfiguration.protocolClasses = [AuthSessionURLProtocol.self]
     let session = URLSession(configuration: sessionConfiguration)
+    let pathPrefix = "/header-\(UUID().uuidString)"
 
     let auth = SwiftRest
         .auth(baseURL: URL(string: "https://api.example.com")!)
@@ -1080,7 +1078,7 @@ private actor RefreshedTokensSink {
         .client
 
     try await auth
-        .path("auth/header-login")
+        .path("\(pathPrefix)/auth/header-login")
         .noAuth()
         .get()
         .send()
@@ -1089,36 +1087,35 @@ private actor RefreshedTokensSink {
     #expect(saved == SwiftRestAuthSession(token: "header-token", refreshToken: "header-refresh-token"))
 
     let snapshot = AuthSessionState.shared.snapshot()
-    #expect(snapshot["/auth/header-login"]?.first == "none")
+    #expect(snapshot["\(pathPrefix)/auth/header-login"]?.first == "none")
 }
 
 @Test func testV5AuthClientRefreshesStoredSessionAfter401() async throws {
-    AuthSessionState.shared.reset()
-
     let sessionConfiguration = URLSessionConfiguration.ephemeral
     sessionConfiguration.protocolClasses = [AuthSessionURLProtocol.self]
     let session = URLSession(configuration: sessionConfiguration)
+    let pathPrefix = "/refresh-\(UUID().uuidString)"
 
     let auth = SwiftRest
         .auth(baseURL: URL(string: "https://api.example.com")!)
         .memory()
-        .refresh(endpoint: "auth/refresh")
+        .refresh(endpoint: "\(pathPrefix)/auth/refresh")
         .tokenField("accessToken")
         .session(session)
         .client
 
     try await auth.save(token: "expired-token", refreshToken: "refresh-token")
 
-    let profile: Dummy = try await auth.path("secure/profile").get().value()
+    let profile: Dummy = try await auth.path("\(pathPrefix)/secure/profile").get().value()
     #expect(profile == Dummy(id: 1, name: "Alice"))
 
     let saved = try await auth.session()
     #expect(saved == SwiftRestAuthSession(token: "fresh-token", refreshToken: "refresh-token"))
 
     let snapshot = AuthSessionState.shared.snapshot()
-    #expect(snapshot["/secure/profile"]?.first == "Bearer expired-token")
-    #expect(snapshot["/secure/profile"]?.last == "Bearer fresh-token")
-    #expect(snapshot["/auth/refresh"]?.first == "none")
+    #expect(snapshot["\(pathPrefix)/secure/profile"]?.first == "Bearer expired-token")
+    #expect(snapshot["\(pathPrefix)/secure/profile"]?.last == "Bearer fresh-token")
+    #expect(snapshot["\(pathPrefix)/auth/refresh"]?.first == "none")
 }
 
 @Test func testV5DefaultsSessionStoreRoundTrip() async throws {
@@ -1755,7 +1752,7 @@ private actor RefreshedTokensSink {
     )
     #expect(SwiftRestConfig.standard.debugLogging.isEnabled == false)
     #expect(SwiftRestConfig.standard.authRefresh.isEnabled == false)
-    #expect(SwiftRestVersion.current == "5.0.0")
+    #expect(SwiftRestVersion.current == "5.0.1")
 
     _ = try SwiftRestClient("https://api.example.com")
 }

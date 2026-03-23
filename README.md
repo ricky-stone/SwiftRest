@@ -45,7 +45,7 @@ The main ideas are:
 Swift Package Manager:
 
 ```swift
-.package(url: "https://github.com/ricky-stone/SwiftRest.git", from: "5.0.0")
+.package(url: "https://github.com/ricky-stone/SwiftRest.git", from: "5.0.1")
 ```
 
 ## Defaults At A Glance
@@ -56,7 +56,7 @@ These are the common defaults you get when you use SwiftRest 5 in the simplest w
 | --- | --- |
 | Plain client setup | `SwiftRest.client(baseURL: ...)` |
 | Auth client setup | `SwiftRest.auth(baseURL: ...)` |
-| Auth storage | Keychain, backed by SwiftKey |
+| Auth storage | Built-in Keychain store |
 | Primary token field | `accessToken` |
 | Refresh token field | Not assumed unless you set it |
 | Refresh request field | `refreshToken` |
@@ -207,7 +207,7 @@ let auth = SwiftRest.auth(baseURL: apiURL, session: session).client
 
 SwiftRest gives you four simple storage choices plus a custom option.
 
-### Keychain, backed by SwiftKey
+### Keychain, built in
 
 This is the recommended choice for real apps.
 
@@ -218,7 +218,7 @@ let auth = SwiftRest
     .client
 ```
 
-SwiftRest uses [SwiftKey](https://github.com/ricky-stone/SwiftKey) internally for this preset.
+The Keychain preset is built into SwiftRest so you do not need any extra package for the common path.
 
 ### UserDefaults
 
@@ -810,9 +810,7 @@ struct ProfileView: View {
 
 ## Acknowledgements
 
-Keychain storage in SwiftRest is powered by [SwiftKey](https://github.com/ricky-stone/SwiftKey).
-
-Special thanks to Ricky Stone for the SwiftKey library that supports the Keychain preset.
+Special thanks to Ricky Stone for [SwiftKey](https://github.com/ricky-stone/SwiftKey), which helped shape the simple keychain ergonomics that inspired this preset.
 
 ## License
 

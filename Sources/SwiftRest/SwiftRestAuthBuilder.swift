@@ -142,7 +142,7 @@ public struct SwiftRestAuthBuilder: Sendable {
         return copy
     }
 
-    /// Uses the Keychain store backed by SwiftKey.
+    /// Uses the built-in Keychain store.
     public func keychain(
         service: String? = nil,
         key: String = "SwiftRest.auth.session"
