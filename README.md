@@ -45,7 +45,7 @@ The main ideas are:
 Swift Package Manager:
 
 ```swift
-.package(url: "https://github.com/ricky-stone/SwiftRest.git", from: "5.0.1")
+.package(url: "https://github.com/ricky-stone/SwiftRest.git", from: "5.1.0")
 ```
 
 ## Defaults At A Glance
@@ -107,7 +107,7 @@ For plain clients, set default headers in the config before creating the client.
 
 ```swift
 var config = SwiftRestConfig.standard
-config.baseHeaders["X-App-Version"] = "5.0.0"
+config.baseHeaders["X-App-Version"] = "5.1.0"
 config.baseHeaders["X-Platform"] = "iOS"
 
 let client = SwiftRest.client(baseURL: apiURL, config: config)
@@ -414,7 +414,7 @@ let auth = SwiftRest
         method: .post,
         requestRefreshField: "sessionRefreshToken",
         triggerStatusCodes: [401, 403],
-        headers: ["X-App-Version": "5.0.0"]
+        headers: ["X-App-Version": "5.1.0"]
     )
     .client
 ```
@@ -455,7 +455,7 @@ The auth builder can set default headers for every request.
 ```swift
 let auth = SwiftRest
     .auth(baseURL: apiURL)
-    .header("X-App-Version", "5.0.0")
+    .header("X-App-Version", "5.1.0")
     .header("X-Platform", "iOS")
     .client
 ```
@@ -466,7 +466,7 @@ You can also add several at once:
 let auth = SwiftRest
     .auth(baseURL: apiURL)
     .headers([
-        "X-App-Version": "5.0.0",
+        "X-App-Version": "5.1.0",
         "X-Platform": "iOS"
     ])
     .client

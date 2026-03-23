@@ -1,5 +1,23 @@
 # Changelog
 
+## 5.1.0 - 2026-03-23
+
+### Removed
+- Legacy V3 convenience wrappers from `SwiftRestClient`, including:
+  - `getRaw/get/getResponse`
+  - `deleteRaw/delete/deleteResponse`
+  - `postRaw/post/postResponse`
+  - `putRaw/put/putResponse`
+  - `patchRaw/patch/patchResponse`
+  - `getResult/deleteResult/postResult/putResult/patchResult`
+- The `makeRequest(...)` helper overloads that only existed to support those legacy wrappers.
+
+### Changed
+- Public API surface is now slimmer and the client autocomplete is focused on the chain-based V4/V5 path.
+- README version snippets updated to `5.1.0`.
+- Tests were updated to use the chain API exclusively.
+- Version marker updated to `5.1.0`.
+
 ## 5.0.1 - 2026-03-23
 
 ### Fixed

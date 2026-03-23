@@ -962,26 +962,30 @@ private actor RefreshedTokensSink {
 @Test func testGlobalAccessTokenAndPrecedence() async throws {
     let client = try makeAuthEchoClient(config: .standard.accessToken("global-token"))
 
-    let globalRaw = try await client.getRaw("users/1")
+    let globalRaw = try await client.path("users/1").get().raw()
     #expect(globalRaw.header("x-observed-authorization") == "Bearer global-token")
 
     await client.setAccessToken("updated-global")
-    let updatedGlobalRaw = try await client.getRaw("users/1")
+    let updatedGlobalRaw = try await client.path("users/1").get().raw()
     #expect(updatedGlobalRaw.header("x-observed-authorization") == "Bearer updated-global")
 
     await client.setAccessTokenProvider { "provider-token" }
-    let providerRaw = try await client.getRaw("users/1")
+    let providerRaw = try await client.path("users/1").get().raw()
     #expect(providerRaw.header("x-observed-authorization") == "Bearer provider-token")
 
-    let requestRaw = try await client.getRaw("users/1", authToken: "request-token")
+    let requestRaw = try await client
+        .path("users/1")
+        .authToken("request-token")
+        .get()
+        .raw()
     #expect(requestRaw.header("x-observed-authorization") == "Bearer request-token")
 
     await client.clearAccessTokenProvider()
-    let fallbackRaw = try await client.getRaw("users/1")
+    let fallbackRaw = try await client.path("users/1").get().raw()
     #expect(fallbackRaw.header("x-observed-authorization") == "Bearer updated-global")
 
     await client.clearAccessToken()
-    let noneRaw = try await client.getRaw("users/1")
+    let noneRaw = try await client.path("users/1").get().raw()
     #expect(noneRaw.header("x-observed-authorization") == "none")
 }
 
@@ -992,7 +996,7 @@ private actor RefreshedTokensSink {
             .accessTokenProvider({ "provider-token" })
     )
 
-    let raw = try await client.getRaw("users/1")
+    let raw = try await client.path("users/1").get().raw()
     #expect(raw.header("x-observed-authorization") == "Bearer provider-token")
 }
 
@@ -1461,7 +1465,7 @@ private actor RefreshedTokensSink {
             .authRefresh(refresh)
     )
 
-    let raw = try await client.getRaw("secure/profile")
+    let raw = try await client.path("secure/profile").get().raw()
     #expect(raw.statusCode == 200)
     #expect(raw.header("x-observed-authorization") == "Bearer fresh-token")
     #expect(await refreshCounter.current() == 1)
@@ -1476,10 +1480,11 @@ private actor RefreshedTokensSink {
 
     let client = try makeRefreshAuthClient(config: .standard.authRefresh(refresh))
 
-    let raw = try await client.getRaw(
-        "secure/profile",
-        authToken: "expired-token"
-    )
+    let raw = try await client
+        .path("secure/profile")
+        .authToken("expired-token")
+        .get()
+        .raw()
     #expect(raw.statusCode == 200)
     #expect(raw.header("x-observed-authorization") == "Bearer fresh-token")
     #expect(await refreshCounter.current() == 1)
@@ -1494,11 +1499,11 @@ private actor RefreshedTokensSink {
 
     let client = try makeRefreshAuthClient(config: .standard.authRefresh(refresh))
 
-    let raw = try await client.getRaw(
-        "secure/profile",
-        authToken: "expired-token",
-        allowHTTPError: true
-    )
+    let raw = try await client
+        .path("secure/profile")
+        .authToken("expired-token")
+        .get()
+        .raw(allowHTTPError: true)
     #expect(raw.statusCode == 401)
     #expect(await refreshCounter.current() == 0)
 }
@@ -1516,7 +1521,7 @@ private actor RefreshedTokensSink {
             .authRefresh(refresh)
     )
 
-    let raw = try await client.getRaw("secure/profile")
+    let raw = try await client.path("secure/profile").get().raw()
     #expect(raw.statusCode == 200)
     #expect(raw.header("x-observed-authorization") == "Bearer fresh-token")
     #expect(await refreshCounter.current() == 1)
@@ -1535,7 +1540,7 @@ private actor RefreshedTokensSink {
             .authRefresh(refresh)
     )
 
-    let raw = try await client.getRaw("secure/profile", allowHTTPError: true)
+    let raw = try await client.path("secure/profile").get().raw(allowHTTPError: true)
     #expect(raw.statusCode == 403)
     #expect(await refreshCounter.current() == 0)
 }
@@ -1587,7 +1592,7 @@ private actor RefreshedTokensSink {
     try await withThrowingTaskGroup(of: Int.self) { group in
         for _ in 0..<6 {
             group.addTask {
-                let raw = try await client.getRaw("secure/profile")
+                let raw = try await client.path("secure/profile").get().raw()
                 return raw.statusCode
             }
         }
@@ -1616,7 +1621,7 @@ private actor RefreshedTokensSink {
     )
 
     do {
-        _ = try await client.getRaw("secure/profile")
+        _ = try await client.path("secure/profile").get().raw()
         #expect(Bool(false))
     } catch let error as SwiftRestClientError {
         switch error {
@@ -1634,7 +1639,10 @@ private actor RefreshedTokensSink {
     let client = try makeResultScenarioClient()
 
     let success: SwiftRestResult<Dummy, APIErrorPayload> =
-        await client.getResult("result-success")
+        await client
+            .path("result-success")
+            .get()
+            .result(as: Dummy.self, error: APIErrorPayload.self)
     switch success {
     case .success(let response):
         #expect(response.statusCode == 200)
@@ -1644,7 +1652,10 @@ private actor RefreshedTokensSink {
     }
 
     let apiError: SwiftRestResult<Dummy, APIErrorPayload> =
-        await client.getResult("result-api-error")
+        await client
+            .path("result-api-error")
+            .get()
+            .result(as: Dummy.self, error: APIErrorPayload.self)
     switch apiError {
     case .apiError(let decoded, let response):
         #expect(response.statusCode == 422)
@@ -1654,7 +1665,10 @@ private actor RefreshedTokensSink {
     }
 
     let undecodable: SwiftRestResult<Dummy, APIErrorPayload> =
-        await client.getResult("result-api-error-plain")
+        await client
+            .path("result-api-error-plain")
+            .get()
+            .result(as: Dummy.self, error: APIErrorPayload.self)
     switch undecodable {
     case .apiError(let decoded, let response):
         #expect(response.statusCode == 500)
@@ -1664,7 +1678,10 @@ private actor RefreshedTokensSink {
     }
 
     let transport: SwiftRestResult<Dummy, APIErrorPayload> =
-        await client.getResult("result-network-failure")
+        await client
+            .path("result-network-failure")
+            .get()
+            .result(as: Dummy.self, error: APIErrorPayload.self)
     switch transport {
     case .failure(let error):
         if case .networkError = error {
@@ -1681,13 +1698,13 @@ private actor RefreshedTokensSink {
     let client = try makeQueryEchoClient()
     let query = UserListQuery(page: 2, search: "ricky", includeInactive: true)
 
-    let getRaw = try await client.getRaw("users", query: query)
+    let getRaw = try await client.path("users").query(query).get().raw()
     let getQuery = getRaw.header("x-observed-query") ?? ""
     #expect(getQuery.contains("page=2"))
     #expect(getQuery.contains("search=ricky"))
     #expect(getQuery.contains("includeInactive=true"))
 
-    let deleteRaw = try await client.deleteRaw("users", query: query)
+    let deleteRaw = try await client.path("users").query(query).delete().raw()
     let deleteQuery = deleteRaw.header("x-observed-query") ?? ""
     #expect(deleteQuery.contains("page=2"))
     #expect(deleteQuery.contains("search=ricky"))
@@ -1710,7 +1727,7 @@ private actor RefreshedTokensSink {
     let client = try makeQueryEchoClient(config: .webAPI)
     let query = UserListQuery(page: 1, search: "ricky", includeInactive: true)
 
-    let raw = try await client.getRaw("users", query: query)
+    let raw = try await client.path("users").query(query).get().raw()
     let observed = raw.header("x-observed-query") ?? ""
     #expect(observed.contains("include_inactive=true"))
     #expect(!observed.contains("includeInactive=true"))
@@ -1730,7 +1747,7 @@ private actor RefreshedTokensSink {
             .debugLogging(logging)
     )
 
-    _ = try await client.getRaw("users/1")
+    _ = try await client.path("users/1").get().raw()
 
     let output = collector.snapshot().joined(separator: "\n").lowercased()
     #expect(output.contains("[swiftrest] -> get"))
@@ -1752,7 +1769,7 @@ private actor RefreshedTokensSink {
     )
     #expect(SwiftRestConfig.standard.debugLogging.isEnabled == false)
     #expect(SwiftRestConfig.standard.authRefresh.isEnabled == false)
-    #expect(SwiftRestVersion.current == "5.0.1")
+    #expect(SwiftRestVersion.current == "5.1.0")
 
     _ = try SwiftRestClient("https://api.example.com")
 }
