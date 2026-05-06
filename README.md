@@ -31,6 +31,8 @@ SwiftRest 6 also has a simple auth client. It can:
 - retry the failed request once
 - optionally add Apple App Attest
 - skip App Attest when App Attest is not available
+- optionally add Apple DeviceCheck
+- use DeviceCheck as a fallback when App Attest is not ready
 
 SwiftRest does not use SwiftKey. SwiftRest has its own built-in Keychain store.
 
@@ -44,6 +46,7 @@ SwiftRest does not use SwiftKey. SwiftRest has its own built-in Keychain store.
 - [Login](#login)
 - [Refresh Tokens](#refresh-tokens)
 - [Apple App Attest](#apple-app-attest)
+- [Apple DeviceCheck](#apple-devicecheck)
 - [Storage](#storage)
 - [Headers](#headers)
 - [Paths](#paths)
@@ -61,7 +64,7 @@ SwiftRest does not use SwiftKey. SwiftRest has its own built-in Keychain store.
 Use Swift Package Manager.
 
 ```swift
-.package(url: "https://github.com/ricky-stone/SwiftRest.git", from: "6.0.0")
+.package(url: "https://github.com/ricky-stone/SwiftRest.git", from: "6.1.0")
 ```
 
 Then import it:
@@ -588,6 +591,178 @@ For TestFlight and App Store builds, Apple uses production.
 SwiftRest handles the client requests.
 Your server still must verify the attestation and assertions.
 
+## Apple DeviceCheck
+
+DeviceCheck helps your server ask Apple for a device token.
+
+DeviceCheck is not a login system.
+DeviceCheck does not replace your session token.
+DeviceCheck does not replace your refresh token.
+DeviceCheck does not sign the request body like App Attest does.
+
+DeviceCheck is simpler than App Attest.
+It can be useful when App Attest is not available yet, or when your server wants Apple DeviceCheck tokens for its own rules.
+
+### Important default
+
+SwiftRest skips DeviceCheck when DeviceCheck is not available.
+
+That means normal token auth still works.
+
+DeviceCheck tokens are not saved in Keychain.
+SwiftRest asks Apple for a fresh token when a request needs one.
+Apple says you should treat the token as single-use.
+
+### DeviceCheck by itself
+
+Use DeviceCheck without App Attest like this:
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .keychain()
+    .sessionTokens()
+    .refresh(endpoint: "auth/refresh")
+    .deviceCheck()
+    .client
+```
+
+SwiftRest will add this header when DeviceCheck is available:
+
+```http
+X-DeviceCheck-Token: base64-devicecheck-token
+```
+
+Your normal auth header is still there too:
+
+```http
+Authorization: Bearer session-token
+```
+
+### DeviceCheck as App Attest fallback
+
+This is the recommended setup when your server supports both:
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .keychain()
+    .sessionTokens()
+    .refresh(endpoint: "auth/refresh")
+    .appAttest(
+        challengeEndpoint: "app-attest/challenge",
+        registerEndpoint: "app-attest/register"
+    )
+    .deviceCheck()
+    .client
+```
+
+This means:
+
+1. Use App Attest when App Attest is working.
+2. Use DeviceCheck when App Attest is unavailable.
+3. Use DeviceCheck when App Attest has not registered a key yet.
+4. Keep normal session token auth working either way.
+
+In this default fallback mode, SwiftRest does not send both proofs at the same time.
+It sends App Attest first when it can.
+It sends DeviceCheck when App Attest cannot be used.
+
+### Send DeviceCheck always
+
+If your server wants DeviceCheck even when App Attest is also sent:
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .keychain()
+    .sessionTokens()
+    .appAttest(
+        challengeEndpoint: "app-attest/challenge",
+        registerEndpoint: "app-attest/register"
+    )
+    .deviceCheck(mode: .always)
+    .client
+```
+
+### Use only DeviceCheck
+
+If you configured App Attest elsewhere but want this SwiftRest client to use only DeviceCheck:
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .keychain()
+    .sessionTokens()
+    .appAttest(
+        challengeEndpoint: "app-attest/challenge",
+        registerEndpoint: "app-attest/register"
+    )
+    .deviceCheck(mode: .only)
+    .client
+```
+
+### Disable DeviceCheck for one request
+
+Use this if one endpoint must not include DeviceCheck:
+
+```swift
+let publicInfo: PublicInfo = try await auth
+    .path("public/info")
+    .deviceCheck(false)
+    .get()
+    .value()
+```
+
+### Make DeviceCheck required
+
+The default is `.skip`.
+
+If you want to throw when DeviceCheck is unavailable:
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .keychain()
+    .sessionTokens()
+    .deviceCheck(unavailableBehavior: .fail)
+    .client
+```
+
+Most apps should start with the default `.skip`.
+
+### Custom DeviceCheck header
+
+If your server wants a different header name:
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .keychain()
+    .sessionTokens()
+    .deviceCheck(
+        headers: SwiftRestDeviceCheckHeaders(
+            token: "X-My-Device-Token"
+        )
+    )
+    .client
+```
+
+### Server work you still need
+
+SwiftRest only gets the DeviceCheck token and sends it to your server.
+
+Your server must:
+
+1. read the `X-DeviceCheck-Token` header
+2. decode the base64 token
+3. validate the token with Apple DeviceCheck server APIs
+4. decide what the token means for your app
+
+DeviceCheck can also support Apple's two server-side per-device bits.
+SwiftRest does not manage those bits.
+Your server owns that logic.
+
 ## Storage
 
 SwiftRest auth needs somewhere to save the session.
@@ -700,7 +875,7 @@ Add one default header to every request:
 ```swift
 let auth = SwiftRest
     .auth(baseURL: apiURL)
-    .header("X-App-Version", "6.0.0")
+    .header("X-App-Version", "6.1.0")
     .client
 ```
 
@@ -710,7 +885,7 @@ Add many default headers:
 let auth = SwiftRest
     .auth(baseURL: apiURL)
     .headers([
-        "X-App-Version": "6.0.0",
+        "X-App-Version": "6.1.0",
         "X-Platform": "iOS"
     ])
     .client
@@ -1099,9 +1274,37 @@ No.
 Most apps should start with normal session token auth.
 Add App Attest when your server is ready to verify it.
 
+### Do I need DeviceCheck?
+
+No.
+
+DeviceCheck is optional.
+Add it when your server is ready to validate Apple DeviceCheck tokens.
+
+### Should I use App Attest or DeviceCheck?
+
+Use App Attest when your server supports it.
+Use DeviceCheck as a fallback when App Attest is not available.
+
+SwiftRest makes that setup simple:
+
+```swift
+.appAttest(
+    challengeEndpoint: "app-attest/challenge",
+    registerEndpoint: "app-attest/register"
+)
+.deviceCheck()
+```
+
 ### What happens on devices that do not support App Attest?
 
 SwiftRest skips App Attest by default.
+
+Your normal bearer token auth still works.
+
+### What happens when DeviceCheck is not available?
+
+SwiftRest skips DeviceCheck by default.
 
 Your normal bearer token auth still works.
 
@@ -1112,6 +1315,14 @@ No.
 The refresh token still refreshes the session token.
 App Attest helps prove the request came from your real app.
 
+### Does DeviceCheck replace App Attest?
+
+No.
+
+DeviceCheck is simpler.
+It gives your server a token to validate with Apple.
+App Attest can prove more about your app and sign request data.
+
 ### Where are tokens saved?
 
 By default, tokens are saved in Keychain.
@@ -1121,6 +1332,9 @@ The saved session can contain:
 - token
 - refresh token
 - App Attest key ID
+
+DeviceCheck tokens are not saved.
+SwiftRest generates them when requests need them.
 
 ### How do I log out?
 
@@ -1155,6 +1369,22 @@ let auth = SwiftRest
         challengeEndpoint: "app-attest/challenge",
         registerEndpoint: "app-attest/register"
     )
+    .client
+```
+
+Then add DeviceCheck fallback when your server supports it:
+
+```swift
+let auth = SwiftRest
+    .auth(baseURL: apiURL)
+    .keychain()
+    .sessionTokens()
+    .refresh(endpoint: "auth/refresh")
+    .appAttest(
+        challengeEndpoint: "app-attest/challenge",
+        registerEndpoint: "app-attest/register"
+    )
+    .deviceCheck()
     .client
 ```
 

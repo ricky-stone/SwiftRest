@@ -23,6 +23,8 @@ public enum SwiftRestClientError: Error, Sendable {
     case authSessionStoreFailed(underlying: ErrorContext)
     case appAttestUnavailable
     case appAttestFailed(underlying: ErrorContext)
+    case deviceCheckUnavailable
+    case deviceCheckFailed(underlying: ErrorContext)
     case networkError(underlying: ErrorContext)
     case decodingError(underlying: ErrorContext)
     case httpError(ErrorResponse)
@@ -49,6 +51,10 @@ extension SwiftRestClientError: LocalizedError {
             return "Apple App Attest is not available on this device."
         case .appAttestFailed(let context):
             return "Apple App Attest failed: \(context.description)"
+        case .deviceCheckUnavailable:
+            return "Apple DeviceCheck is not available on this device."
+        case .deviceCheckFailed(let context):
+            return "Apple DeviceCheck failed: \(context.description)"
         case .networkError(let context):
             return "A network error occurred: \(context.description)"
         case .decodingError(let context):
@@ -85,6 +91,10 @@ public extension SwiftRestClientError {
             return "App Attest is not available on this device."
         case .appAttestFailed(let context):
             return "App Attest failed: \(context.description)"
+        case .deviceCheckUnavailable:
+            return "DeviceCheck is not available on this device."
+        case .deviceCheckFailed(let context):
+            return "DeviceCheck failed: \(context.description)"
         case .networkError(let context):
             return "Network error: \(context.description)"
         case .decodingError(let context):

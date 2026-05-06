@@ -149,6 +149,15 @@ public struct SwiftRestAuthPathBuilder: Sendable {
         return copy
     }
 
+    /// Enables/disables DeviceCheck tokens for this request.
+    ///
+    /// This only matters when the auth client was created with `.deviceCheck(...)`.
+    public func deviceCheck(_ enabled: Bool) -> Self {
+        var copy = self
+        copy.request.configureDeviceCheck(enabled)
+        return copy
+    }
+
     /// Overrides refresh-token lookup for this request if refresh is triggered.
     public func refreshTokenProvider(
         _ provider: @escaping SwiftRestRefreshTokenProvider

@@ -418,12 +418,35 @@ private final class MockAppAttestProvider: SwiftRestAppAttestProviding, @uncheck
     }
 }
 
+private final class MockDeviceCheckProvider: SwiftRestDeviceCheckProviding, @unchecked Sendable {
+    private let supported: Bool
+    private let token: Data
+
+    init(
+        supported: Bool = true,
+        token: Data = Data("device-check-token".utf8)
+    ) {
+        self.supported = supported
+        self.token = token
+    }
+
+    func isSupported() async -> Bool {
+        supported
+    }
+
+    func generateToken() async throws -> Data {
+        token
+    }
+}
+
 private struct AppAttestRecordedRequest: Sendable {
     let path: String
     let authorization: String
     let keyID: String
     let assertion: String
     let clientData: String
+    let deviceCheckToken: String
+    let customDeviceCheckToken: String
     let body: String
 }
 
@@ -446,6 +469,8 @@ private final class AppAttestState: @unchecked Sendable {
             keyID: request.value(forHTTPHeaderField: "X-App-Attest-Key-ID") ?? "none",
             assertion: request.value(forHTTPHeaderField: "X-App-Attest-Assertion") ?? "none",
             clientData: request.value(forHTTPHeaderField: "X-App-Attest-Client-Data") ?? "none",
+            deviceCheckToken: request.value(forHTTPHeaderField: "X-DeviceCheck-Token") ?? "none",
+            customDeviceCheckToken: request.value(forHTTPHeaderField: "X-Custom-DeviceCheck") ?? "none",
             body: requestBodyText(request)
         )
 
@@ -1448,6 +1473,216 @@ private actor RefreshedTokensSink {
     #expect(secureRequests.allSatisfy { $0.keyID == "mock-app-attest-key" })
 }
 
+@Test func testV61DeviceCheckSkipsWhenUnavailableAndAuthStillWorks() async throws {
+    AppAttestState.shared.reset()
+    let pathPrefix = "device-skip-\(UUID().uuidString)"
+
+    let auth = SwiftRest
+        .auth(baseURL: URL(string: "https://api.example.com")!)
+        .memory(session: SwiftRestAuthSession(token: "session-token"))
+        .sessionTokens()
+        .deviceCheck()
+        .deviceCheckProvider(MockDeviceCheckProvider(supported: false))
+        .session(makeAppAttestURLSession())
+        .client
+
+    let profile: Dummy = try await auth.path("\(pathPrefix)/secure/profile").get().value()
+    #expect(profile == Dummy(id: 1, name: "Alice"))
+
+    let secure = try #require(AppAttestState.shared.snapshot().last {
+        $0.path.contains(pathPrefix) && $0.path.hasSuffix("/secure/profile")
+    })
+    #expect(secure.authorization == "Bearer session-token")
+    #expect(secure.deviceCheckToken == "none")
+}
+
+@Test func testV61DeviceCheckStandaloneAddsTokenHeader() async throws {
+    AppAttestState.shared.reset()
+    let pathPrefix = "device-standalone-\(UUID().uuidString)"
+    let token = Data("standalone-token".utf8)
+
+    let auth = SwiftRest
+        .auth(baseURL: URL(string: "https://api.example.com")!)
+        .memory(session: SwiftRestAuthSession(token: "session-token"))
+        .sessionTokens()
+        .deviceCheck()
+        .deviceCheckProvider(MockDeviceCheckProvider(token: token))
+        .session(makeAppAttestURLSession())
+        .client
+
+    let profile: Dummy = try await auth.path("\(pathPrefix)/secure/profile").get().value()
+    #expect(profile == Dummy(id: 1, name: "Alice"))
+
+    let secure = try #require(AppAttestState.shared.snapshot().last {
+        $0.path.contains(pathPrefix) && $0.path.hasSuffix("/secure/profile")
+    })
+    #expect(secure.authorization == "Bearer session-token")
+    #expect(secure.deviceCheckToken == token.base64EncodedString())
+    #expect(secure.keyID == "none")
+}
+
+@Test func testV61DeviceCheckFallbackUsesAppAttestWhenRegistered() async throws {
+    AppAttestState.shared.reset()
+    let pathPrefix = "device-attest-first-\(UUID().uuidString)"
+
+    let auth = SwiftRest
+        .auth(baseURL: URL(string: "https://api.example.com")!)
+        .memory(session: SwiftRestAuthSession(
+            token: "session-token",
+            refreshToken: "refresh-token",
+            appAttestKeyID: "mock-app-attest-key"
+        ))
+        .sessionTokens()
+        .appAttest(
+            challengeEndpoint: "\(pathPrefix)/app-attest/challenge",
+            registerEndpoint: "\(pathPrefix)/app-attest/register"
+        )
+        .deviceCheck()
+        .appAttestProvider(MockAppAttestProvider())
+        .deviceCheckProvider(MockDeviceCheckProvider())
+        .session(makeAppAttestURLSession())
+        .client
+
+    let profile: Dummy = try await auth.path("\(pathPrefix)/secure/profile").get().value()
+    #expect(profile == Dummy(id: 1, name: "Alice"))
+
+    let secure = try #require(AppAttestState.shared.snapshot().last {
+        $0.path.contains(pathPrefix) && $0.path.hasSuffix("/secure/profile")
+    })
+    #expect(secure.keyID == "mock-app-attest-key")
+    #expect(secure.assertion != "none")
+    #expect(secure.deviceCheckToken == "none")
+}
+
+@Test func testV61DeviceCheckFallbackUsesDeviceCheckWhenAppAttestUnavailable() async throws {
+    AppAttestState.shared.reset()
+    let pathPrefix = "device-fallback-\(UUID().uuidString)"
+    let token = Data("fallback-token".utf8)
+
+    let auth = SwiftRest
+        .auth(baseURL: URL(string: "https://api.example.com")!)
+        .memory(session: SwiftRestAuthSession(token: "session-token"))
+        .sessionTokens()
+        .appAttest(
+            challengeEndpoint: "\(pathPrefix)/app-attest/challenge",
+            registerEndpoint: "\(pathPrefix)/app-attest/register",
+            unavailableBehavior: .fail
+        )
+        .deviceCheck()
+        .appAttestProvider(MockAppAttestProvider(supported: false))
+        .deviceCheckProvider(MockDeviceCheckProvider(token: token))
+        .session(makeAppAttestURLSession())
+        .client
+
+    let profile: Dummy = try await auth.path("\(pathPrefix)/secure/profile").get().value()
+    #expect(profile == Dummy(id: 1, name: "Alice"))
+
+    let secure = try #require(AppAttestState.shared.snapshot().last {
+        $0.path.contains(pathPrefix) && $0.path.hasSuffix("/secure/profile")
+    })
+    #expect(secure.keyID == "none")
+    #expect(secure.deviceCheckToken == token.base64EncodedString())
+}
+
+@Test func testV61DeviceCheckSignsRefreshWhenFallbackIsActive() async throws {
+    AppAttestState.shared.reset()
+    let pathPrefix = "device-refresh-\(UUID().uuidString)"
+    let token = Data("refresh-device-token".utf8)
+
+    let auth = SwiftRest
+        .auth(baseURL: URL(string: "https://api.example.com")!)
+        .memory(session: SwiftRestAuthSession(
+            token: "expired-token",
+            refreshToken: "refresh-token"
+        ))
+        .sessionTokens()
+        .refresh(endpoint: "\(pathPrefix)/auth/refresh")
+        .appAttest(
+            challengeEndpoint: "\(pathPrefix)/app-attest/challenge",
+            registerEndpoint: "\(pathPrefix)/app-attest/register"
+        )
+        .deviceCheck()
+        .appAttestProvider(MockAppAttestProvider())
+        .deviceCheckProvider(MockDeviceCheckProvider(token: token))
+        .session(makeAppAttestURLSession())
+        .client
+
+    let profile: Dummy = try await auth.path("\(pathPrefix)/secure/profile").get().value()
+    #expect(profile == Dummy(id: 1, name: "Alice"))
+
+    let refresh = try #require(AppAttestState.shared.snapshot().first {
+        $0.path.contains(pathPrefix) && $0.path.hasSuffix("/auth/refresh")
+    })
+    #expect(refresh.deviceCheckToken == token.base64EncodedString())
+    #expect(refresh.keyID == "none")
+}
+
+@Test func testV61DeviceCheckCanBeDisabledPerRequest() async throws {
+    AppAttestState.shared.reset()
+    let pathPrefix = "device-disabled-\(UUID().uuidString)"
+
+    let auth = SwiftRest
+        .auth(baseURL: URL(string: "https://api.example.com")!)
+        .memory(session: SwiftRestAuthSession(token: "session-token"))
+        .sessionTokens()
+        .deviceCheck()
+        .deviceCheckProvider(MockDeviceCheckProvider())
+        .session(makeAppAttestURLSession())
+        .client
+
+    let profile: Dummy = try await auth
+        .path("\(pathPrefix)/secure/profile")
+        .deviceCheck(false)
+        .get()
+        .value()
+
+    #expect(profile == Dummy(id: 1, name: "Alice"))
+
+    let secure = try #require(AppAttestState.shared.snapshot().last {
+        $0.path.contains(pathPrefix) && $0.path.hasSuffix("/secure/profile")
+    })
+    #expect(secure.deviceCheckToken == "none")
+}
+
+@Test func testV61DeviceCheckFailThrowsWhenUnavailable() async throws {
+    let auth = SwiftRest
+        .auth(baseURL: URL(string: "https://api.example.com")!)
+        .memory(session: SwiftRestAuthSession(token: "session-token"))
+        .sessionTokens()
+        .deviceCheck(unavailableBehavior: .fail)
+        .deviceCheckProvider(MockDeviceCheckProvider(supported: false))
+        .session(makeAppAttestURLSession())
+        .client
+
+    await #expect(throws: SwiftRestClientError.self) {
+        let _: Dummy = try await auth.path("secure/profile").get().value()
+    }
+}
+
+@Test func testV61DeviceCheckCustomHeaderNameWorks() async throws {
+    AppAttestState.shared.reset()
+    let pathPrefix = "device-custom-\(UUID().uuidString)"
+    let token = Data("custom-token".utf8)
+
+    let auth = SwiftRest
+        .auth(baseURL: URL(string: "https://api.example.com")!)
+        .memory(session: SwiftRestAuthSession(token: "session-token"))
+        .sessionTokens()
+        .deviceCheck(headers: SwiftRestDeviceCheckHeaders(token: "X-Custom-DeviceCheck"))
+        .deviceCheckProvider(MockDeviceCheckProvider(token: token))
+        .session(makeAppAttestURLSession())
+        .client
+
+    let profile: Dummy = try await auth.path("\(pathPrefix)/secure/profile").get().value()
+    #expect(profile == Dummy(id: 1, name: "Alice"))
+
+    let secure = try #require(AppAttestState.shared.snapshot().last {
+        $0.path.contains(pathPrefix) && $0.path.hasSuffix("/secure/profile")
+    })
+    #expect(secure.deviceCheckToken == "none")
+    #expect(secure.customDeviceCheckToken == token.base64EncodedString())
+}
+
 @Test func testV6OldStoredSessionsDecodeWithoutAppAttestKey() throws {
     let data = Data(#"{"token":"old-token","refreshToken":"old-refresh"}"#.utf8)
     let session = try JSONDecoder().decode(SwiftRestAuthSession.self, from: data)
@@ -2101,7 +2336,7 @@ private actor RefreshedTokensSink {
     )
     #expect(SwiftRestConfig.standard.debugLogging.isEnabled == false)
     #expect(SwiftRestConfig.standard.authRefresh.isEnabled == false)
-    #expect(SwiftRestVersion.current == "6.0.0")
+    #expect(SwiftRestVersion.current == "6.1.0")
 
     _ = try SwiftRestClient("https://api.example.com")
 }

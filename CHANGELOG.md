@@ -1,5 +1,30 @@
 # Changelog
 
+## 6.1.0 - 2026-05-06
+
+### Added
+- Optional Apple DeviceCheck support for the auth/session client:
+  - `.deviceCheck(mode:unavailableBehavior:headers:)`
+  - `.deviceCheck(false)` per-request bypass
+  - `SwiftRestDeviceCheckConfig`
+  - `SwiftRestDeviceCheckMode`
+  - `SwiftRestDeviceCheckUnavailableBehavior`
+  - `SwiftRestDeviceCheckHeaders`
+- Default App Attest fallback behavior:
+  - App Attest is used first when registered and available.
+  - DeviceCheck is used when App Attest is unavailable or not registered.
+- DeviceCheck provider abstraction for testability.
+- README DeviceCheck section with beginner examples and server responsibilities.
+
+### Changed
+- Version marker updated to `6.1.0`.
+- README install snippet updated to `6.1.0`.
+
+### Compatibility
+- DeviceCheck tokens are not stored in Keychain.
+- Existing Keychain session, session token, refresh token, App Attest, and refresh retry behavior remains supported.
+- Existing v6 App Attest tests continue passing.
+
 ## 6.0.0 - 2026-05-06
 
 ### Added

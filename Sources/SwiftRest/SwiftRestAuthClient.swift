@@ -8,6 +8,7 @@ public actor SwiftRestAuthClient {
     private let sessionStore: any SwiftRestSessionStore
     private let settings: SwiftRestAuthSettings
     private let appAttestProvider: any SwiftRestAppAttestProviding
+    private let deviceCheckProvider: any SwiftRestDeviceCheckProviding
     private var refreshTask: Task<SwiftRestAuthSession?, Error>?
     private var appAttestRegistrationTask: Task<SwiftRestAuthSession?, Error>?
 
@@ -17,7 +18,8 @@ public actor SwiftRestAuthClient {
         config: SwiftRestConfig,
         sessionStore: any SwiftRestSessionStore,
         settings: SwiftRestAuthSettings,
-        appAttestProvider: any SwiftRestAppAttestProviding = SwiftRestDefaultAppAttestProvider()
+        appAttestProvider: any SwiftRestAppAttestProviding = SwiftRestDefaultAppAttestProvider(),
+        deviceCheckProvider: any SwiftRestDeviceCheckProviding = SwiftRestDefaultDeviceCheckProvider()
     ) {
         self.baseClient = baseClient
         self.baseURL = baseURL
@@ -25,6 +27,7 @@ public actor SwiftRestAuthClient {
         self.sessionStore = sessionStore
         self.settings = settings
         self.appAttestProvider = appAttestProvider
+        self.deviceCheckProvider = deviceCheckProvider
     }
 
     /// Returns the current saved auth session.
@@ -219,7 +222,7 @@ public actor SwiftRestAuthClient {
         allowHTTPError: Bool
     ) async throws -> SwiftRestRawResponse {
         let preparedRequest = try await prepareRequest(request)
-        let firstRequest = try await appAttestedRequest(preparedRequest)
+        let firstRequest = try await integrityProtectedRequest(preparedRequest)
         let raw = try await baseClient.executeRaw(firstRequest, allowHTTPError: true)
 
         if shouldAttemptRefresh(
@@ -231,8 +234,8 @@ public actor SwiftRestAuthClient {
                let refreshedToken = refreshedSession.token,
                refreshedToken != preparedRequest.authToken {
                 let retriedRequest = preparedRequest.authToken(refreshedToken)
-                let appAttestedRetriedRequest = try await appAttestedRequest(retriedRequest)
-                let retried = try await baseClient.executeRaw(appAttestedRetriedRequest, allowHTTPError: true)
+                let protectedRetriedRequest = try await integrityProtectedRequest(retriedRequest)
+                let retried = try await baseClient.executeRaw(protectedRetriedRequest, allowHTTPError: true)
                 try await autoSaveSession(from: retried, existingRefreshToken: refreshedSession.refreshToken)
 
                 if !allowHTTPError, !retried.isSuccess {
@@ -353,8 +356,8 @@ public actor SwiftRestAuthClient {
             using: config.jsonCoding.makeEncoder()
         )
 
-        let appAttestedRefreshRequest = try await appAttestedRequest(refreshRequest)
-        let raw = try await baseClient.executeRaw(appAttestedRefreshRequest, allowHTTPError: true)
+        let protectedRefreshRequest = try await integrityProtectedRequest(refreshRequest)
+        let raw = try await baseClient.executeRaw(protectedRefreshRequest, allowHTTPError: true)
 
         guard raw.isSuccess else {
             throw SwiftRestClientError.httpError(makeErrorResponse(from: raw))
@@ -437,18 +440,30 @@ public actor SwiftRestAuthClient {
         )
     }
 
-    private func appAttestedRequest(_ request: SwiftRestRequest) async throws -> SwiftRestRequest {
+    private func integrityProtectedRequest(_ request: SwiftRestRequest) async throws -> SwiftRestRequest {
+        let shouldUseAppAttest = settings.deviceCheckConfig?.mode != .only
+        let appAttestResult = shouldUseAppAttest
+            ? try await appAttestedRequest(request)
+            : SwiftRestIntegrityRequest(request: request, appAttestApplied: false)
+
+        return try await deviceCheckedRequest(
+            appAttestResult.request,
+            appAttestApplied: appAttestResult.appAttestApplied
+        )
+    }
+
+    private func appAttestedRequest(_ request: SwiftRestRequest) async throws -> SwiftRestIntegrityRequest {
         guard shouldAttemptAppAttest(for: request) else {
-            return request
+            return SwiftRestIntegrityRequest(request: request, appAttestApplied: false)
         }
 
-        guard try await isAppAttestAvailable() else {
-            return request
+        guard try await isAppAttestAvailable(allowFallbackSkip: canDeviceCheckFallback(for: request)) else {
+            return SwiftRestIntegrityRequest(request: request, appAttestApplied: false)
         }
 
         let session = try await currentSession()
         guard let keyID = normalizedToken(session?.appAttestKeyID) else {
-            return request
+            return SwiftRestIntegrityRequest(request: request, appAttestApplied: false)
         }
 
         do {
@@ -462,14 +477,14 @@ public actor SwiftRestAuthClient {
             let clientDataHash = SwiftRestAppAttestSHA256.hash(clientDataBytes)
             let assertion = try await appAttestProvider.generateAssertion(keyID, clientDataHash: clientDataHash)
             guard let appAttestConfig = settings.appAttestConfig else {
-                return request
+                return SwiftRestIntegrityRequest(request: request, appAttestApplied: false)
             }
 
             var copy = request
             copy.addHeader(appAttestConfig.assertionHeaders.keyID, keyID)
             copy.addHeader(appAttestConfig.assertionHeaders.assertion, assertion.base64EncodedString())
             copy.addHeader(appAttestConfig.assertionHeaders.clientData, clientDataBytes.base64EncodedString())
-            return copy
+            return SwiftRestIntegrityRequest(request: copy, appAttestApplied: true)
         } catch let error as SwiftRestClientError {
             throw error
         } catch {
@@ -489,12 +504,24 @@ public actor SwiftRestAuthClient {
         return true
     }
 
+    private func canDeviceCheckFallback(for request: SwiftRestRequest) -> Bool {
+        guard let deviceCheckConfig = settings.deviceCheckConfig else {
+            return false
+        }
+
+        guard request.deviceCheckEnabled != false else {
+            return false
+        }
+
+        return deviceCheckConfig.mode == .fallbackToAppAttest
+    }
+
     private func appAttestPath(for request: SwiftRestRequest) -> String {
         let path = SwiftRestPathUtilities.joinedPath(baseURL.path, request.path)
         return path.hasPrefix("/") ? path : "/\(path)"
     }
 
-    private func isAppAttestAvailable() async throws -> Bool {
+    private func isAppAttestAvailable(allowFallbackSkip: Bool = false) async throws -> Bool {
         guard let appAttestConfig = settings.appAttestConfig else {
             return false
         }
@@ -507,7 +534,75 @@ public actor SwiftRestAuthClient {
         case .skip:
             return false
         case .fail:
+            if allowFallbackSkip {
+                return false
+            }
             throw SwiftRestClientError.appAttestUnavailable
+        }
+    }
+
+    private func deviceCheckedRequest(
+        _ request: SwiftRestRequest,
+        appAttestApplied: Bool
+    ) async throws -> SwiftRestRequest {
+        guard shouldAttemptDeviceCheck(for: request, appAttestApplied: appAttestApplied) else {
+            return request
+        }
+
+        guard try await isDeviceCheckAvailable() else {
+            return request
+        }
+
+        do {
+            guard let deviceCheckConfig = settings.deviceCheckConfig else {
+                return request
+            }
+
+            let token = try await deviceCheckProvider.generateToken()
+            var copy = request
+            copy.addHeader(deviceCheckConfig.headers.token, token.base64EncodedString())
+            return copy
+        } catch let error as SwiftRestClientError {
+            throw error
+        } catch {
+            throw SwiftRestClientError.deviceCheckFailed(underlying: ErrorContext(error))
+        }
+    }
+
+    private func shouldAttemptDeviceCheck(
+        for request: SwiftRestRequest,
+        appAttestApplied: Bool
+    ) -> Bool {
+        guard let deviceCheckConfig = settings.deviceCheckConfig else {
+            return false
+        }
+
+        guard request.deviceCheckEnabled != false else {
+            return false
+        }
+
+        switch deviceCheckConfig.mode {
+        case .fallbackToAppAttest:
+            return !appAttestApplied
+        case .always, .only:
+            return true
+        }
+    }
+
+    private func isDeviceCheckAvailable() async throws -> Bool {
+        guard let deviceCheckConfig = settings.deviceCheckConfig else {
+            return false
+        }
+
+        if await deviceCheckProvider.isSupported() {
+            return true
+        }
+
+        switch deviceCheckConfig.unavailableBehavior {
+        case .skip:
+            return false
+        case .fail:
+            throw SwiftRestClientError.deviceCheckUnavailable
         }
     }
 
@@ -751,4 +846,9 @@ private func normalizedToken(_ token: String?) -> String? {
 
     let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.isEmpty ? nil : trimmed
+}
+
+private struct SwiftRestIntegrityRequest: Sendable {
+    var request: SwiftRestRequest
+    var appAttestApplied: Bool
 }

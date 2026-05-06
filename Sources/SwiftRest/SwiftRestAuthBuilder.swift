@@ -19,6 +19,7 @@ struct SwiftRestAuthSettings: Sendable {
     var refreshHeaders: [String: String] = [:]
     var triggerStatusCodes: Set<Int> = [401]
     var appAttestConfig: SwiftRestAppAttestConfig?
+    var deviceCheckConfig: SwiftRestDeviceCheckConfig?
 }
 
 /// Entry point for beginner-friendly auth/session setup.
@@ -50,6 +51,7 @@ public struct SwiftRestAuthBuilder: Sendable {
     private var sessionStore: any SwiftRestSessionStore
     private var settings: SwiftRestAuthSettings
     private var appAttestProvider: any SwiftRestAppAttestProviding
+    private var deviceCheckProvider: any SwiftRestDeviceCheckProviding
 
     init(
         baseURL: URL,
@@ -63,6 +65,7 @@ public struct SwiftRestAuthBuilder: Sendable {
         self.sessionStore = sessionStore
         self.settings = SwiftRestAuthSettings()
         self.appAttestProvider = SwiftRestDefaultAppAttestProvider()
+        self.deviceCheckProvider = SwiftRestDefaultDeviceCheckProvider()
     }
 
     /// Sets a default header for every request.
@@ -294,6 +297,36 @@ public struct SwiftRestAuthBuilder: Sendable {
         return copy
     }
 
+    /// Enables Apple DeviceCheck for this auth client.
+    ///
+    /// By default, DeviceCheck is used as a fallback when App Attest is unavailable or not registered.
+    public func deviceCheck(
+        mode: SwiftRestDeviceCheckMode = .fallbackToAppAttest,
+        unavailableBehavior: SwiftRestDeviceCheckUnavailableBehavior = .skip,
+        headers: SwiftRestDeviceCheckHeaders = .standard
+    ) -> Self {
+        deviceCheck(
+            SwiftRestDeviceCheckConfig(
+                mode: mode,
+                unavailableBehavior: unavailableBehavior,
+                headers: headers
+            )
+        )
+    }
+
+    /// Enables Apple DeviceCheck with a pre-built configuration.
+    public func deviceCheck(_ deviceCheck: SwiftRestDeviceCheckConfig) -> Self {
+        var copy = self
+        copy.settings.deviceCheckConfig = deviceCheck
+        return copy
+    }
+
+    func deviceCheckProvider(_ provider: any SwiftRestDeviceCheckProviding) -> Self {
+        var copy = self
+        copy.deviceCheckProvider = provider
+        return copy
+    }
+
     /// Final auth/session client.
     public var client: SwiftRestAuthClient {
         SwiftRestAuthClient(
@@ -302,7 +335,8 @@ public struct SwiftRestAuthBuilder: Sendable {
             config: config,
             sessionStore: sessionStore,
             settings: settings,
-            appAttestProvider: appAttestProvider
+            appAttestProvider: appAttestProvider,
+            deviceCheckProvider: deviceCheckProvider
         )
     }
 
