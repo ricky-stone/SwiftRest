@@ -18,6 +18,7 @@ struct SwiftRestAuthSettings: Sendable {
     var refreshRequestField: String = "refreshToken"
     var refreshHeaders: [String: String] = [:]
     var triggerStatusCodes: Set<Int> = [401]
+    var appAttestConfig: SwiftRestAppAttestConfig?
 }
 
 /// Entry point for beginner-friendly auth/session setup.
@@ -48,6 +49,7 @@ public struct SwiftRestAuthBuilder: Sendable {
     private var session: URLSession
     private var sessionStore: any SwiftRestSessionStore
     private var settings: SwiftRestAuthSettings
+    private var appAttestProvider: any SwiftRestAppAttestProviding
 
     init(
         baseURL: URL,
@@ -60,6 +62,7 @@ public struct SwiftRestAuthBuilder: Sendable {
         self.session = session
         self.sessionStore = sessionStore
         self.settings = SwiftRestAuthSettings()
+        self.appAttestProvider = SwiftRestDefaultAppAttestProvider()
     }
 
     /// Sets a default header for every request.
@@ -188,6 +191,25 @@ public struct SwiftRestAuthBuilder: Sendable {
         tokenSource(.bodyField(field))
     }
 
+    /// Uses the common `sessionToken` and `refreshToken` JSON field names.
+    public func sessionTokens() -> Self {
+        tokenField("sessionToken").refreshTokenField("refreshToken")
+    }
+
+    /// Uses the common `accessToken` and `refreshToken` JSON field names.
+    public func accessTokens() -> Self {
+        tokenField("accessToken").refreshTokenField("refreshToken")
+    }
+
+    /// Uses custom JSON field names for the main token and optional refresh token.
+    public func tokenFields(token: String, refresh: String? = nil) -> Self {
+        var copy = tokenField(token)
+        if let refresh {
+            copy = copy.refreshTokenField(refresh)
+        }
+        return copy
+    }
+
     /// Reads the primary token from a response header.
     public func tokenHeader(_ header: String) -> Self {
         tokenSource(.header(header))
@@ -234,13 +256,53 @@ public struct SwiftRestAuthBuilder: Sendable {
         return copy
     }
 
+    /// Enables Apple App Attest for this auth client.
+    ///
+    /// App Attest is skipped by default on unsupported devices so normal token auth keeps working.
+    public func appAttest(
+        challengeEndpoint: String,
+        registerEndpoint: String,
+        challengeMethod: HTTPMethod = .post,
+        registerMethod: HTTPMethod = .post,
+        unavailableBehavior: SwiftRestAppAttestUnavailableBehavior = .skip,
+        headers: [String: String] = [:],
+        assertionHeaders: SwiftRestAppAttestHeaders = .standard
+    ) -> Self {
+        appAttest(
+            SwiftRestAppAttestConfig(
+                challengeEndpoint: challengeEndpoint,
+                registerEndpoint: registerEndpoint,
+                challengeMethod: challengeMethod,
+                registerMethod: registerMethod,
+                unavailableBehavior: unavailableBehavior,
+                headers: headers,
+                assertionHeaders: assertionHeaders
+            )
+        )
+    }
+
+    /// Enables Apple App Attest with a pre-built configuration.
+    public func appAttest(_ appAttest: SwiftRestAppAttestConfig) -> Self {
+        var copy = self
+        copy.settings.appAttestConfig = appAttest
+        return copy
+    }
+
+    func appAttestProvider(_ provider: any SwiftRestAppAttestProviding) -> Self {
+        var copy = self
+        copy.appAttestProvider = provider
+        return copy
+    }
+
     /// Final auth/session client.
     public var client: SwiftRestAuthClient {
         SwiftRestAuthClient(
             baseClient: SwiftRestClient(baseURL: baseURL, config: config, session: session),
+            baseURL: baseURL,
             config: config,
             sessionStore: sessionStore,
-            settings: settings
+            settings: settings,
+            appAttestProvider: appAttestProvider
         )
     }
 

@@ -10,6 +10,7 @@ public struct SwiftRestRequest: Sendable {
     public private(set) var authToken: String?
     public private(set) var noAuth: Bool
     public private(set) var autoRefreshEnabled: Bool?
+    public private(set) var appAttestEnabled: Bool?
     public private(set) var refreshTokenProvider: SwiftRestRefreshTokenProvider?
     public private(set) var retryPolicy: RetryPolicy?
     public private(set) var jsonCoding: SwiftRestJSONCoding?
@@ -23,6 +24,7 @@ public struct SwiftRestRequest: Sendable {
         self.authToken = nil
         self.noAuth = false
         self.autoRefreshEnabled = nil
+        self.appAttestEnabled = nil
         self.refreshTokenProvider = nil
         self.retryPolicy = nil
         self.jsonCoding = nil
@@ -99,6 +101,10 @@ public struct SwiftRestRequest: Sendable {
 
     public mutating func configureAutoRefresh(_ enabled: Bool) {
         self.autoRefreshEnabled = enabled
+    }
+
+    public mutating func configureAppAttest(_ enabled: Bool) {
+        self.appAttestEnabled = enabled
     }
 
     public mutating func configureRefreshTokenProvider(
@@ -243,6 +249,12 @@ public struct SwiftRestRequest: Sendable {
     public func autoRefresh(_ enabled: Bool) -> Self {
         var copy = self
         copy.configureAutoRefresh(enabled)
+        return copy
+    }
+
+    public func appAttest(_ enabled: Bool) -> Self {
+        var copy = self
+        copy.configureAppAttest(enabled)
         return copy
     }
 

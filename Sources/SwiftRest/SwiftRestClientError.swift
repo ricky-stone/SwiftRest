@@ -21,6 +21,8 @@ public enum SwiftRestClientError: Error, Sendable {
     case invalidQueryParameters(reason: String)
     case authRefreshFailed(underlying: ErrorContext)
     case authSessionStoreFailed(underlying: ErrorContext)
+    case appAttestUnavailable
+    case appAttestFailed(underlying: ErrorContext)
     case networkError(underlying: ErrorContext)
     case decodingError(underlying: ErrorContext)
     case httpError(ErrorResponse)
@@ -43,6 +45,10 @@ extension SwiftRestClientError: LocalizedError {
             return "Failed to refresh access token: \(context.description)"
         case .authSessionStoreFailed(let context):
             return "Failed to access auth session storage: \(context.description)"
+        case .appAttestUnavailable:
+            return "Apple App Attest is not available on this device."
+        case .appAttestFailed(let context):
+            return "Apple App Attest failed: \(context.description)"
         case .networkError(let context):
             return "A network error occurred: \(context.description)"
         case .decodingError(let context):
@@ -75,6 +81,10 @@ public extension SwiftRestClientError {
             return "Authentication refresh failed: \(context.description)"
         case .authSessionStoreFailed(let context):
             return "Authentication session storage failed: \(context.description)"
+        case .appAttestUnavailable:
+            return "App Attest is not available on this device."
+        case .appAttestFailed(let context):
+            return "App Attest failed: \(context.description)"
         case .networkError(let context):
             return "Network error: \(context.description)"
         case .decodingError(let context):

@@ -140,6 +140,15 @@ public struct SwiftRestAuthPathBuilder: Sendable {
         return copy
     }
 
+    /// Enables/disables App Attest assertions for this request.
+    ///
+    /// This only matters when the auth client was created with `.appAttest(...)`.
+    public func appAttest(_ enabled: Bool) -> Self {
+        var copy = self
+        copy.request.configureAppAttest(enabled)
+        return copy
+    }
+
     /// Overrides refresh-token lookup for this request if refresh is triggered.
     public func refreshTokenProvider(
         _ provider: @escaping SwiftRestRefreshTokenProvider

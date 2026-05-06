@@ -6,7 +6,7 @@
 /// An enumeration representing the HTTP methods used in REST requests.
 ///
 /// Conforms to `Sendable` to ensure safe usage in concurrent contexts.
-public enum HTTPMethod: String, Sendable {
+public enum HTTPMethod: String, Sendable, Equatable {
     /// The GET method.
     case get = "GET"
     /// The POST method.

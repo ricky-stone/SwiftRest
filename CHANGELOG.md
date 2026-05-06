@@ -1,5 +1,33 @@
 # Changelog
 
+## 6.0.0 - 2026-05-06
+
+### Added
+- Optional Apple App Attest support for the auth/session client:
+  - `.appAttest(challengeEndpoint:registerEndpoint:...)`
+  - `ensureAppAttestRegistered()`
+  - per-request `.appAttest(false)` bypass
+  - default skip behavior when App Attest is unavailable
+- App Attest key ID persistence on `SwiftRestAuthSession`.
+- Beginner auth presets:
+  - `.sessionTokens()` for `sessionToken` and `refreshToken`
+  - `.accessTokens()` for `accessToken` and `refreshToken`
+  - `.tokenFields(token:refresh:)` for custom token names
+- Session inspection helpers:
+  - `hasSession()`
+  - `hasRefreshToken()`
+  - `hasAppAttestKey()`
+
+### Changed
+- Version marker updated to `6.0.0`.
+- README rewritten for the v6 beginner-first flow, including App Attest, session tokens, refresh tokens, Keychain storage, and server expectations.
+- `HTTPMethod` now explicitly conforms to `Equatable`.
+
+### Compatibility
+- Existing v5 auth, Keychain, refresh, and request-chain behavior remains supported.
+- Old saved sessions without an App Attest key decode normally.
+- SwiftRest continues to use its built-in Keychain store. SwiftKey is not a package dependency.
+
 ## 5.1.0 - 2026-03-23
 
 ### Removed

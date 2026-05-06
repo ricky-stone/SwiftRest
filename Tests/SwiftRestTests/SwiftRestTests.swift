@@ -389,6 +389,172 @@ private struct AuthLoginResponse: Decodable, Sendable, Equatable {
     let refreshToken: String?
 }
 
+private struct SessionTokenLoginResponse: Decodable, Sendable, Equatable {
+    let sessionToken: String
+    let refreshToken: String?
+}
+
+private final class MockAppAttestProvider: SwiftRestAppAttestProviding, @unchecked Sendable {
+    private let supported: Bool
+
+    init(supported: Bool = true) {
+        self.supported = supported
+    }
+
+    func isSupported() async -> Bool {
+        supported
+    }
+
+    func generateKey() async throws -> String {
+        "mock-app-attest-key"
+    }
+
+    func attestKey(_ keyID: String, clientDataHash: Data) async throws -> Data {
+        Data("attestation:\(keyID):\(clientDataHash.count)".utf8)
+    }
+
+    func generateAssertion(_ keyID: String, clientDataHash: Data) async throws -> Data {
+        Data("assertion:\(keyID):\(clientDataHash.count)".utf8)
+    }
+}
+
+private struct AppAttestRecordedRequest: Sendable {
+    let path: String
+    let authorization: String
+    let keyID: String
+    let assertion: String
+    let clientData: String
+    let body: String
+}
+
+private final class AppAttestState: @unchecked Sendable {
+    static let shared = AppAttestState()
+
+    private let lock = NSLock()
+    private var requests: [AppAttestRecordedRequest] = []
+
+    func reset() {
+        lock.lock()
+        requests = []
+        lock.unlock()
+    }
+
+    func record(_ request: URLRequest) {
+        let item = AppAttestRecordedRequest(
+            path: request.url?.path ?? "",
+            authorization: request.value(forHTTPHeaderField: "Authorization") ?? "none",
+            keyID: request.value(forHTTPHeaderField: "X-App-Attest-Key-ID") ?? "none",
+            assertion: request.value(forHTTPHeaderField: "X-App-Attest-Assertion") ?? "none",
+            clientData: request.value(forHTTPHeaderField: "X-App-Attest-Client-Data") ?? "none",
+            body: requestBodyText(request)
+        )
+
+        lock.lock()
+        requests.append(item)
+        lock.unlock()
+    }
+
+    func snapshot() -> [AppAttestRecordedRequest] {
+        lock.lock()
+        defer { lock.unlock() }
+        return requests
+    }
+}
+
+private final class AppAttestURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+
+        AppAttestState.shared.record(request)
+
+        switch true {
+        case url.path.hasSuffix("/app-attest/challenge"):
+            respond(
+                url: url,
+                statusCode: 200,
+                headers: ["Content-Type": "application/json"],
+                body: #"{"challenge":"server-challenge"}"#
+            )
+        case url.path.hasSuffix("/app-attest/register"):
+            respond(
+                url: url,
+                statusCode: 200,
+                headers: ["Content-Type": "application/json"],
+                body: #"{}"#
+            )
+        case url.path.hasSuffix("/auth/login"):
+            respond(
+                url: url,
+                statusCode: 200,
+                headers: ["Content-Type": "application/json"],
+                body: #"{"sessionToken":"session-token","refreshToken":"refresh-token"}"#
+            )
+        case url.path.hasSuffix("/auth/refresh"):
+            respond(
+                url: url,
+                statusCode: 200,
+                headers: ["Content-Type": "application/json"],
+                body: #"{"sessionToken":"fresh-session-token","refreshToken":"fresh-refresh-token"}"#
+            )
+        case url.path.hasSuffix("/secure/profile"):
+            let authHeader = request.value(forHTTPHeaderField: "Authorization") ?? "none"
+            if authHeader == "Bearer session-token" || authHeader == "Bearer fresh-session-token" {
+                respond(
+                    url: url,
+                    statusCode: 200,
+                    headers: ["Content-Type": "application/json"],
+                    body: #"{"id":1,"name":"Alice"}"#
+                )
+            } else {
+                respond(
+                    url: url,
+                    statusCode: 401,
+                    headers: ["Content-Type": "application/json"],
+                    body: #"{"message":"Unauthorized"}"#
+                )
+            }
+        default:
+            respond(
+                url: url,
+                statusCode: 404,
+                headers: ["Content-Type": "application/json"],
+                body: #"{"message":"Not found"}"#
+            )
+        }
+    }
+
+    override func stopLoading() {}
+
+    private func respond(
+        url: URL,
+        statusCode: Int,
+        headers: [String: String],
+        body: String
+    ) {
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: statusCode,
+            httpVersion: nil,
+            headerFields: headers
+        )!
+
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
 private final class EndpointRefreshState: @unchecked Sendable {
     static let shared = EndpointRefreshState()
 
@@ -715,6 +881,12 @@ private func makeEndpointRefreshForbiddenSession() -> URLSession {
 private func makeEndpointRefreshWithRefreshTokenSession() -> URLSession {
     let sessionConfiguration = URLSessionConfiguration.ephemeral
     sessionConfiguration.protocolClasses = [EndpointRefreshWithRefreshTokenURLProtocol.self]
+    return URLSession(configuration: sessionConfiguration)
+}
+
+private func makeAppAttestURLSession() -> URLSession {
+    let sessionConfiguration = URLSessionConfiguration.ephemeral
+    sessionConfiguration.protocolClasses = [AppAttestURLProtocol.self]
     return URLSession(configuration: sessionConfiguration)
 }
 
@@ -1120,6 +1292,166 @@ private actor RefreshedTokensSink {
     #expect(snapshot["\(pathPrefix)/secure/profile"]?.first == "Bearer expired-token")
     #expect(snapshot["\(pathPrefix)/secure/profile"]?.last == "Bearer fresh-token")
     #expect(snapshot["\(pathPrefix)/auth/refresh"]?.first == "none")
+}
+
+@Test func testV6AppAttestSkipsWhenUnavailableAndAuthStillWorks() async throws {
+    AppAttestState.shared.reset()
+    let pathPrefix = "skip-\(UUID().uuidString)"
+
+    let auth = SwiftRest
+        .auth(baseURL: URL(string: "https://api.example.com")!)
+        .memory(session: SwiftRestAuthSession(token: "session-token"))
+        .sessionTokens()
+        .appAttest(
+            challengeEndpoint: "\(pathPrefix)/app-attest/challenge",
+            registerEndpoint: "\(pathPrefix)/app-attest/register"
+        )
+        .appAttestProvider(MockAppAttestProvider(supported: false))
+        .session(makeAppAttestURLSession())
+        .client
+
+    let profile: Dummy = try await auth.path("\(pathPrefix)/secure/profile").get().value()
+    #expect(profile == Dummy(id: 1, name: "Alice"))
+
+    let snapshot = AppAttestState.shared.snapshot().filter { $0.path.contains(pathPrefix) }
+    let secureRequest = snapshot.last
+    #expect(secureRequest?.authorization == "Bearer session-token")
+    #expect(secureRequest?.keyID == "none")
+    #expect(secureRequest?.assertion == "none")
+    #expect(!snapshot.contains { $0.path.hasSuffix("/app-attest/challenge") })
+}
+
+@Test func testV6AppAttestRegistersAfterLoginAndSignsRequests() async throws {
+    AppAttestState.shared.reset()
+    let pathPrefix = "register-\(UUID().uuidString)"
+
+    let auth = SwiftRest
+        .auth(baseURL: URL(string: "https://api.example.com")!)
+        .memory()
+        .sessionTokens()
+        .appAttest(
+            challengeEndpoint: "\(pathPrefix)/app-attest/challenge",
+            registerEndpoint: "\(pathPrefix)/app-attest/register"
+        )
+        .appAttestProvider(MockAppAttestProvider())
+        .session(makeAppAttestURLSession())
+        .client
+
+    let login: SessionTokenLoginResponse = try await auth
+        .path("\(pathPrefix)/auth/login")
+        .noAuth()
+        .post(body: AuthLoginRequest(email: "ricky@example.com"))
+        .value()
+
+    #expect(login == SessionTokenLoginResponse(sessionToken: "session-token", refreshToken: "refresh-token"))
+
+    let saved = try await auth.session()
+    #expect(saved == SwiftRestAuthSession(
+        token: "session-token",
+        refreshToken: "refresh-token",
+        appAttestKeyID: "mock-app-attest-key"
+    ))
+    #expect(try await auth.hasAppAttestKey())
+
+    let profile: Dummy = try await auth.path("\(pathPrefix)/secure/profile").get().value()
+    #expect(profile == Dummy(id: 1, name: "Alice"))
+
+    let snapshot = AppAttestState.shared.snapshot().filter { $0.path.contains(pathPrefix) }
+    let register = try #require(snapshot.first { $0.path.hasSuffix("/app-attest/register") })
+    #expect(register.authorization == "Bearer session-token")
+    #expect(register.body.contains(#""keyId":"mock-app-attest-key""#))
+
+    let secure = try #require(snapshot.last { $0.path.hasSuffix("/secure/profile") })
+    #expect(secure.authorization == "Bearer session-token")
+    #expect(secure.keyID == "mock-app-attest-key")
+    #expect(secure.assertion != "none")
+    #expect(secure.clientData != "none")
+}
+
+@Test func testV6AppAttestCanBeDisabledPerRequest() async throws {
+    AppAttestState.shared.reset()
+    let pathPrefix = "disabled-\(UUID().uuidString)"
+
+    let auth = SwiftRest
+        .auth(baseURL: URL(string: "https://api.example.com")!)
+        .memory(session: SwiftRestAuthSession(
+            token: "session-token",
+            refreshToken: "refresh-token",
+            appAttestKeyID: "mock-app-attest-key"
+        ))
+        .sessionTokens()
+        .appAttest(
+            challengeEndpoint: "\(pathPrefix)/app-attest/challenge",
+            registerEndpoint: "\(pathPrefix)/app-attest/register"
+        )
+        .appAttestProvider(MockAppAttestProvider())
+        .session(makeAppAttestURLSession())
+        .client
+
+    let profile: Dummy = try await auth
+        .path("\(pathPrefix)/secure/profile")
+        .appAttest(false)
+        .get()
+        .value()
+
+    #expect(profile == Dummy(id: 1, name: "Alice"))
+
+    let secure = try #require(AppAttestState.shared.snapshot().last {
+        $0.path.contains(pathPrefix) && $0.path.hasSuffix("/secure/profile")
+    })
+    #expect(secure.authorization == "Bearer session-token")
+    #expect(secure.keyID == "none")
+    #expect(secure.assertion == "none")
+}
+
+@Test func testV6AppAttestSurvivesRefreshAndSignsRetry() async throws {
+    AppAttestState.shared.reset()
+    let pathPrefix = "refresh-attest-\(UUID().uuidString)"
+
+    let auth = SwiftRest
+        .auth(baseURL: URL(string: "https://api.example.com")!)
+        .memory(session: SwiftRestAuthSession(
+            token: "expired-token",
+            refreshToken: "refresh-token",
+            appAttestKeyID: "mock-app-attest-key"
+        ))
+        .sessionTokens()
+        .refresh(endpoint: "\(pathPrefix)/auth/refresh")
+        .appAttest(
+            challengeEndpoint: "\(pathPrefix)/app-attest/challenge",
+            registerEndpoint: "\(pathPrefix)/app-attest/register"
+        )
+        .appAttestProvider(MockAppAttestProvider())
+        .session(makeAppAttestURLSession())
+        .client
+
+    let profile: Dummy = try await auth.path("\(pathPrefix)/secure/profile").get().value()
+    #expect(profile == Dummy(id: 1, name: "Alice"))
+
+    let saved = try await auth.session()
+    #expect(saved == SwiftRestAuthSession(
+        token: "fresh-session-token",
+        refreshToken: "fresh-refresh-token",
+        appAttestKeyID: "mock-app-attest-key"
+    ))
+
+    let snapshot = AppAttestState.shared.snapshot().filter { $0.path.contains(pathPrefix) }
+    let refresh = try #require(snapshot.first { $0.path.hasSuffix("/auth/refresh") })
+    #expect(refresh.authorization == "none")
+    #expect(refresh.keyID == "mock-app-attest-key")
+    #expect(refresh.assertion != "none")
+
+    let secureRequests = snapshot.filter { $0.path.hasSuffix("/secure/profile") }
+    #expect(secureRequests.count == 2)
+    #expect(secureRequests.first?.authorization == "Bearer expired-token")
+    #expect(secureRequests.last?.authorization == "Bearer fresh-session-token")
+    #expect(secureRequests.allSatisfy { $0.keyID == "mock-app-attest-key" })
+}
+
+@Test func testV6OldStoredSessionsDecodeWithoutAppAttestKey() throws {
+    let data = Data(#"{"token":"old-token","refreshToken":"old-refresh"}"#.utf8)
+    let session = try JSONDecoder().decode(SwiftRestAuthSession.self, from: data)
+    #expect(session == SwiftRestAuthSession(token: "old-token", refreshToken: "old-refresh"))
 }
 
 @Test func testV5DefaultsSessionStoreRoundTrip() async throws {
@@ -1769,7 +2101,7 @@ private actor RefreshedTokensSink {
     )
     #expect(SwiftRestConfig.standard.debugLogging.isEnabled == false)
     #expect(SwiftRestConfig.standard.authRefresh.isEnabled == false)
-    #expect(SwiftRestVersion.current == "5.1.0")
+    #expect(SwiftRestVersion.current == "6.0.0")
 
     _ = try SwiftRestClient("https://api.example.com")
 }

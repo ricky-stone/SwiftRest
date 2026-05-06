@@ -3,21 +3,28 @@ import Foundation
 /// A beginner-friendly auth/session wrapper built on top of `SwiftRestClient`.
 public actor SwiftRestAuthClient {
     private let baseClient: SwiftRestClient
+    private let baseURL: URL
     private let config: SwiftRestConfig
     private let sessionStore: any SwiftRestSessionStore
     private let settings: SwiftRestAuthSettings
+    private let appAttestProvider: any SwiftRestAppAttestProviding
     private var refreshTask: Task<SwiftRestAuthSession?, Error>?
+    private var appAttestRegistrationTask: Task<SwiftRestAuthSession?, Error>?
 
     init(
         baseClient: SwiftRestClient,
+        baseURL: URL,
         config: SwiftRestConfig,
         sessionStore: any SwiftRestSessionStore,
-        settings: SwiftRestAuthSettings
+        settings: SwiftRestAuthSettings,
+        appAttestProvider: any SwiftRestAppAttestProviding = SwiftRestDefaultAppAttestProvider()
     ) {
         self.baseClient = baseClient
+        self.baseURL = baseURL
         self.config = config
         self.sessionStore = sessionStore
         self.settings = settings
+        self.appAttestProvider = appAttestProvider
     }
 
     /// Returns the current saved auth session.
@@ -34,7 +41,8 @@ public actor SwiftRestAuthClient {
     public func save(_ session: SwiftRestAuthSession) async throws {
         let normalized = SwiftRestAuthSession(
             token: normalizedToken(session.token),
-            refreshToken: normalizedToken(session.refreshToken)
+            refreshToken: normalizedToken(session.refreshToken),
+            appAttestKeyID: normalizedToken(session.appAttestKeyID)
         )
         try await sessionStore.save(normalized)
     }
@@ -52,8 +60,50 @@ public actor SwiftRestAuthClient {
     /// Clears the stored session.
     public func logout() async throws {
         refreshTask?.cancel()
+        appAttestRegistrationTask?.cancel()
         refreshTask = nil
+        appAttestRegistrationTask = nil
         try await sessionStore.clear()
+    }
+
+    /// Returns `true` when a usable token is stored.
+    public func hasSession() async throws -> Bool {
+        let session = try await currentSession()
+        return normalizedToken(session?.token) != nil
+    }
+
+    /// Returns `true` when a refresh token is stored.
+    public func hasRefreshToken() async throws -> Bool {
+        let session = try await currentSession()
+        return normalizedToken(session?.refreshToken) != nil
+    }
+
+    /// Returns `true` when an App Attest key ID is stored.
+    public func hasAppAttestKey() async throws -> Bool {
+        let session = try await currentSession()
+        return normalizedToken(session?.appAttestKeyID) != nil
+    }
+
+    /// Registers an App Attest key if App Attest is enabled, supported, and not already registered.
+    ///
+    /// If App Attest is unsupported and the config uses the default `.skip` behavior, this returns
+    /// the current session without changing normal token auth.
+    @discardableResult
+    public func ensureAppAttestRegistered() async throws -> SwiftRestAuthSession? {
+        guard settings.appAttestConfig != nil else {
+            return try await currentSession()
+        }
+
+        if let task = appAttestRegistrationTask {
+            return try await consumeAppAttestRegistrationTask(task)
+        }
+
+        let task = Task<SwiftRestAuthSession?, Error> {
+            try await self.performAppAttestRegistrationIfNeeded()
+        }
+        appAttestRegistrationTask = task
+        defer { appAttestRegistrationTask = nil }
+        return try await consumeAppAttestRegistrationTask(task)
     }
 
     public func executeRaw(
@@ -169,7 +219,8 @@ public actor SwiftRestAuthClient {
         allowHTTPError: Bool
     ) async throws -> SwiftRestRawResponse {
         let preparedRequest = try await prepareRequest(request)
-        let raw = try await baseClient.executeRaw(preparedRequest, allowHTTPError: true)
+        let firstRequest = try await appAttestedRequest(preparedRequest)
+        let raw = try await baseClient.executeRaw(firstRequest, allowHTTPError: true)
 
         if shouldAttemptRefresh(
                for: request,
@@ -180,7 +231,8 @@ public actor SwiftRestAuthClient {
                let refreshedToken = refreshedSession.token,
                refreshedToken != preparedRequest.authToken {
                 let retriedRequest = preparedRequest.authToken(refreshedToken)
-                let retried = try await baseClient.executeRaw(retriedRequest, allowHTTPError: true)
+                let appAttestedRetriedRequest = try await appAttestedRequest(retriedRequest)
+                let retried = try await baseClient.executeRaw(appAttestedRetriedRequest, allowHTTPError: true)
                 try await autoSaveSession(from: retried, existingRefreshToken: refreshedSession.refreshToken)
 
                 if !allowHTTPError, !retried.isSuccess {
@@ -301,7 +353,8 @@ public actor SwiftRestAuthClient {
             using: config.jsonCoding.makeEncoder()
         )
 
-        let raw = try await baseClient.executeRaw(refreshRequest, allowHTTPError: true)
+        let appAttestedRefreshRequest = try await appAttestedRequest(refreshRequest)
+        let raw = try await baseClient.executeRaw(appAttestedRefreshRequest, allowHTTPError: true)
 
         guard raw.isSuccess else {
             throw SwiftRestClientError.httpError(makeErrorResponse(from: raw))
@@ -310,13 +363,14 @@ public actor SwiftRestAuthClient {
         guard let refreshedSession = try buildSession(
             from: raw,
             existingRefreshToken: currentSession?.refreshToken,
+            existingAppAttestKeyID: currentSession?.appAttestKeyID,
             requireToken: true
         ) else {
             return currentSession
         }
 
         try await sessionStore.save(refreshedSession)
-        return refreshedSession
+        return try await ensureAppAttestRegistered() ?? refreshedSession
     }
 
     private func resolveRefreshToken(
@@ -339,20 +393,25 @@ public actor SwiftRestAuthClient {
             return
         }
 
+        let currentSession = try await sessionStore.load()
+
         guard let session = try buildSession(
             from: raw,
             existingRefreshToken: existingRefreshToken,
+            existingAppAttestKeyID: currentSession?.appAttestKeyID,
             requireToken: false
         ) else {
             return
         }
 
         try await sessionStore.save(session)
+        _ = try await ensureAppAttestRegistered()
     }
 
     private func buildSession(
         from raw: SwiftRestRawResponse,
         existingRefreshToken: String? = nil,
+        existingAppAttestKeyID: String? = nil,
         requireToken: Bool
     ) throws -> SwiftRestAuthSession? {
         let token = try extractToken(from: raw, source: settings.tokenSource)
@@ -371,7 +430,236 @@ public actor SwiftRestAuthClient {
             return nil
         }
 
-        return SwiftRestAuthSession(token: token, refreshToken: refreshToken)
+        return SwiftRestAuthSession(
+            token: token,
+            refreshToken: refreshToken,
+            appAttestKeyID: normalizedToken(existingAppAttestKeyID)
+        )
+    }
+
+    private func appAttestedRequest(_ request: SwiftRestRequest) async throws -> SwiftRestRequest {
+        guard shouldAttemptAppAttest(for: request) else {
+            return request
+        }
+
+        guard try await isAppAttestAvailable() else {
+            return request
+        }
+
+        let session = try await currentSession()
+        guard let keyID = normalizedToken(session?.appAttestKeyID) else {
+            return request
+        }
+
+        do {
+            let challenge = try await fetchAppAttestChallenge(purpose: .assertion)
+            let clientData = SwiftRestAppAttestClientData(
+                challenge: challenge,
+                request: request,
+                path: appAttestPath(for: request)
+            )
+            let clientDataBytes = try SwiftRestAppAttestJSON.encodedData(clientData)
+            let clientDataHash = SwiftRestAppAttestSHA256.hash(clientDataBytes)
+            let assertion = try await appAttestProvider.generateAssertion(keyID, clientDataHash: clientDataHash)
+            guard let appAttestConfig = settings.appAttestConfig else {
+                return request
+            }
+
+            var copy = request
+            copy.addHeader(appAttestConfig.assertionHeaders.keyID, keyID)
+            copy.addHeader(appAttestConfig.assertionHeaders.assertion, assertion.base64EncodedString())
+            copy.addHeader(appAttestConfig.assertionHeaders.clientData, clientDataBytes.base64EncodedString())
+            return copy
+        } catch let error as SwiftRestClientError {
+            throw error
+        } catch {
+            throw SwiftRestClientError.appAttestFailed(underlying: ErrorContext(error))
+        }
+    }
+
+    private func shouldAttemptAppAttest(for request: SwiftRestRequest) -> Bool {
+        guard settings.appAttestConfig != nil else {
+            return false
+        }
+
+        guard request.appAttestEnabled != false else {
+            return false
+        }
+
+        return true
+    }
+
+    private func appAttestPath(for request: SwiftRestRequest) -> String {
+        let path = SwiftRestPathUtilities.joinedPath(baseURL.path, request.path)
+        return path.hasPrefix("/") ? path : "/\(path)"
+    }
+
+    private func isAppAttestAvailable() async throws -> Bool {
+        guard let appAttestConfig = settings.appAttestConfig else {
+            return false
+        }
+
+        if await appAttestProvider.isSupported() {
+            return true
+        }
+
+        switch appAttestConfig.unavailableBehavior {
+        case .skip:
+            return false
+        case .fail:
+            throw SwiftRestClientError.appAttestUnavailable
+        }
+    }
+
+    private func consumeAppAttestRegistrationTask(
+        _ task: Task<SwiftRestAuthSession?, Error>
+    ) async throws -> SwiftRestAuthSession? {
+        do {
+            return try await task.value
+        } catch let cancellation as CancellationError {
+            throw cancellation
+        } catch let clientError as SwiftRestClientError {
+            throw clientError
+        } catch {
+            throw SwiftRestClientError.appAttestFailed(underlying: ErrorContext(error))
+        }
+    }
+
+    private func performAppAttestRegistrationIfNeeded() async throws -> SwiftRestAuthSession? {
+        guard settings.appAttestConfig != nil else {
+            return try await currentSession()
+        }
+
+        guard try await isAppAttestAvailable() else {
+            return try await currentSession()
+        }
+
+        let session = try await currentSession()
+        guard let session else {
+            return nil
+        }
+
+        guard normalizedToken(session.appAttestKeyID) == nil else {
+            return session
+        }
+
+        guard normalizedToken(session.token) != nil else {
+            return session
+        }
+
+        do {
+            return try await performAppAttestRegistration(with: session)
+        } catch let error as SwiftRestClientError {
+            throw error
+        } catch {
+            throw SwiftRestClientError.appAttestFailed(underlying: ErrorContext(error))
+        }
+    }
+
+    private func performAppAttestRegistration(
+        with session: SwiftRestAuthSession
+    ) async throws -> SwiftRestAuthSession {
+        let challenge = try await fetchAppAttestChallenge(purpose: .registration)
+        let clientData = SwiftRestAppAttestRegistrationClientData(challenge: challenge)
+        let clientDataBytes = try SwiftRestAppAttestJSON.encodedData(clientData)
+        let clientDataHash = SwiftRestAppAttestSHA256.hash(clientDataBytes)
+        let keyID = normalizedToken(try await appAttestProvider.generateKey())
+
+        guard let keyID else {
+            throw SwiftRestClientError.appAttestFailed(
+                underlying: ErrorContext(description: "App Attest generated an empty key ID.")
+            )
+        }
+
+        let attestation = try await appAttestProvider.attestKey(keyID, clientDataHash: clientDataHash)
+        let body = SwiftRestAppAttestRegisterRequest(
+            keyId: keyID,
+            attestationObject: attestation.base64EncodedString(),
+            clientData: clientDataBytes.base64EncodedString()
+        )
+
+        guard let appAttestConfig = settings.appAttestConfig else {
+            return session
+        }
+
+        var request = SwiftRestRequest(
+            path: appAttestConfig.registerEndpoint,
+            method: appAttestConfig.registerMethod
+        )
+        request.addHeaders(appAttestConfig.headers)
+        try request.addJsonBody(body, using: config.jsonCoding.makeEncoder())
+
+        let raw = try await executeAppAttestInternalRaw(request)
+        guard raw.isSuccess else {
+            throw SwiftRestClientError.httpError(makeErrorResponse(from: raw))
+        }
+
+        let registeredSession = SwiftRestAuthSession(
+            token: session.token,
+            refreshToken: session.refreshToken,
+            appAttestKeyID: keyID
+        )
+        try await sessionStore.save(registeredSession)
+        return registeredSession
+    }
+
+    private func fetchAppAttestChallenge(
+        purpose: SwiftRestAppAttestPurpose
+    ) async throws -> String {
+        guard let appAttestConfig = settings.appAttestConfig else {
+            throw SwiftRestClientError.appAttestFailed(
+                underlying: ErrorContext(description: "App Attest is not configured.")
+            )
+        }
+
+        var request = SwiftRestRequest(
+            path: appAttestConfig.challengeEndpoint,
+            method: appAttestConfig.challengeMethod
+        )
+        request.addHeaders(appAttestConfig.headers)
+
+        if appAttestConfig.challengeMethod == .get {
+            request.addParameter("purpose", purpose.rawValue)
+        } else {
+            try request.addJsonBody(
+                SwiftRestAppAttestChallengeRequest(purpose: purpose.rawValue),
+                using: config.jsonCoding.makeEncoder()
+            )
+        }
+
+        let raw = try await executeAppAttestInternalRaw(request)
+        guard raw.isSuccess else {
+            throw SwiftRestClientError.httpError(makeErrorResponse(from: raw))
+        }
+
+        guard let response: SwiftRestAppAttestChallengeResponse = try decodeResponseData(
+            raw,
+            as: SwiftRestAppAttestChallengeResponse.self,
+            coding: config.jsonCoding
+        ),
+            let challenge = normalizedToken(response.challenge)
+        else {
+            throw SwiftRestClientError.appAttestFailed(
+                underlying: ErrorContext(description: "Challenge response missing \"challenge\".")
+            )
+        }
+
+        return challenge
+    }
+
+    private func executeAppAttestInternalRaw(
+        _ request: SwiftRestRequest
+    ) async throws -> SwiftRestRawResponse {
+        var prepared = request
+
+        if !prepared.noAuth, prepared.authToken == nil {
+            let session = try await currentSession()
+            if let token = normalizedToken(session?.token) {
+                prepared = prepared.authToken(token)
+            }
+        }
+
+        return try await baseClient.executeRaw(prepared, allowHTTPError: true)
     }
 
     private func extractToken(
