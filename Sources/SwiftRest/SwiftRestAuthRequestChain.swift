@@ -221,6 +221,11 @@ public struct SwiftRestAuthPathBuilder: Sendable {
         prepared(method: .delete)
     }
 
+    /// Prepares a `POST` request with no body.
+    public func post() -> SwiftRestAuthPreparedRequest {
+        prepared(method: .post)
+    }
+
     /// Prepares a `POST` request with a JSON-encoded body.
     public func post<Body: Encodable & Sendable>(
         body: Body

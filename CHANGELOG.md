@@ -1,5 +1,21 @@
 # Changelog
 
+## 6.2.0 - 2026-05-07
+
+### Added
+- Chainable no-body POST support:
+  - `client.path(...).post().send()`
+  - `auth.path(...).post().send()`
+- README examples for POST endpoints that need headers or `.noAuth()` but do not need a request body.
+
+### Changed
+- Version marker updated to `6.2.0`.
+- README install snippet updated to `6.2.0`.
+
+### Compatibility
+- Existing `.post(body:)` behavior is unchanged.
+- This is a non-breaking v6 minor release.
+
 ## 6.1.0 - 2026-05-06
 
 ### Added

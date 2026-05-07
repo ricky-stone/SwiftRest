@@ -64,7 +64,7 @@ SwiftRest does not use SwiftKey. SwiftRest has its own built-in Keychain store.
 Use Swift Package Manager.
 
 ```swift
-.package(url: "https://github.com/ricky-stone/SwiftRest.git", from: "6.1.0")
+.package(url: "https://github.com/ricky-stone/SwiftRest.git", from: "6.2.0")
 ```
 
 Then import it:
@@ -875,7 +875,7 @@ Add one default header to every request:
 ```swift
 let auth = SwiftRest
     .auth(baseURL: apiURL)
-    .header("X-App-Version", "6.1.0")
+    .header("X-App-Version", "6.2.0")
     .client
 ```
 
@@ -885,7 +885,7 @@ Add many default headers:
 let auth = SwiftRest
     .auth(baseURL: apiURL)
     .headers([
-        "X-App-Version": "6.1.0",
+        "X-App-Version": "6.2.0",
         "X-Platform": "iOS"
     ])
     .client
@@ -992,6 +992,19 @@ let user: User = try await auth.path("users/1").get().value()
 ```
 
 POST:
+
+Use `.post()` when the endpoint wants a POST request but does not need a body:
+
+```swift
+try await auth
+    .path("v1/session")
+    .noAuth()
+    .header("X-Client", "ios")
+    .post()
+    .send()
+```
+
+Use `.post(body:)` when the endpoint needs a JSON body:
 
 ```swift
 struct CreateUser: Encodable, Sendable {
@@ -1131,12 +1144,12 @@ print(raw.rawValue ?? "no body")
 
 ### Send without a response model
 
-Use this for logout or delete calls:
+Use this for logout, delete calls, or POST endpoints that do not need a body:
 
 ```swift
 try await auth
     .path("auth/logout")
-    .post(body: [String: String]())
+    .post()
     .send()
 ```
 

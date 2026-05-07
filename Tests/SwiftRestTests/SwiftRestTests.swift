@@ -54,6 +54,80 @@ private struct RefreshTokenResponse: Decodable, Sendable {
     let accessToken: String
 }
 
+private struct NoBodyPostRecord: Sendable, Equatable {
+    let path: String
+    let method: String
+    let authorization: String
+    let body: String
+    let contentType: String
+    let clientHeader: String
+}
+
+private final class NoBodyPostState: @unchecked Sendable {
+    static let shared = NoBodyPostState()
+
+    private let lock = NSLock()
+    private var records: [NoBodyPostRecord] = []
+
+    func reset() {
+        lock.lock()
+        records = []
+        lock.unlock()
+    }
+
+    func record(_ request: URLRequest) {
+        let record = NoBodyPostRecord(
+            path: request.url?.path ?? "",
+            method: request.httpMethod ?? "UNKNOWN",
+            authorization: request.value(forHTTPHeaderField: "Authorization") ?? "none",
+            body: requestBodyText(request),
+            contentType: request.value(forHTTPHeaderField: "Content-Type") ?? "none",
+            clientHeader: request.value(forHTTPHeaderField: "X-Client") ?? "none"
+        )
+
+        lock.lock()
+        records.append(record)
+        lock.unlock()
+    }
+
+    func snapshot() -> [NoBodyPostRecord] {
+        lock.lock()
+        defer { lock.unlock() }
+        return records
+    }
+}
+
+private final class NoBodyPostURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+
+        NoBodyPostState.shared.record(request)
+
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: [:]
+        )!
+
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
 private final class EchoAuthURLProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool {
         true
@@ -861,6 +935,12 @@ private func makeMethodEchoClient(config: SwiftRestConfig = .standard) throws ->
     sessionConfiguration.protocolClasses = [MethodEchoURLProtocol.self]
     let session = URLSession(configuration: sessionConfiguration)
     return try SwiftRestClient("https://api.example.com", config: config, session: session)
+}
+
+private func makeNoBodyPostSession() -> URLSession {
+    let sessionConfiguration = URLSessionConfiguration.ephemeral
+    sessionConfiguration.protocolClasses = [NoBodyPostURLProtocol.self]
+    return URLSession(configuration: sessionConfiguration)
 }
 
 private func makeSimpleSuccessClient(config: SwiftRestConfig = .standard) throws -> SwiftRestClient {
@@ -1858,6 +1938,54 @@ private actor RefreshedTokensSink {
     #expect(optionsRaw.header("x-observed-method") == "OPTIONS")
 }
 
+@Test func testV62ChainSupportsNoBodyPostWithNoAuth() async throws {
+    NoBodyPostState.shared.reset()
+
+    let client = try SwiftRest
+        .for("https://api.example.com")
+        .accessToken("should-not-send")
+        .session(makeNoBodyPostSession())
+        .client
+
+    try await client
+        .path("v1/session")
+        .header("X-Client", "ios")
+        .noAuth()
+        .post()
+        .send()
+
+    let record = try #require(NoBodyPostState.shared.snapshot().last)
+    #expect(record.path == "/v1/session")
+    #expect(record.method == "POST")
+    #expect(record.authorization == "none")
+    #expect(record.body == "")
+    #expect(record.contentType == "none")
+    #expect(record.clientHeader == "ios")
+}
+
+@Test func testV62AuthChainSupportsNoBodyPostWithNoAuth() async throws {
+    NoBodyPostState.shared.reset()
+
+    let auth = SwiftRest
+        .auth(baseURL: URL(string: "https://api.example.com")!)
+        .memory(session: SwiftRestAuthSession(token: "saved-session-token"))
+        .session(makeNoBodyPostSession())
+        .client
+
+    try await auth
+        .path("v1/session")
+        .noAuth()
+        .post()
+        .send()
+
+    let record = try #require(NoBodyPostState.shared.snapshot().last)
+    #expect(record.path == "/v1/session")
+    #expect(record.method == "POST")
+    #expect(record.authorization == "none")
+    #expect(record.body == "")
+    #expect(record.contentType == "none")
+}
+
 @Test func testV4ChainQueryUsesGlobalJSONCoding() async throws {
     let sessionConfiguration = URLSessionConfiguration.ephemeral
     sessionConfiguration.protocolClasses = [EchoQueryURLProtocol.self]
@@ -2336,7 +2464,7 @@ private actor RefreshedTokensSink {
     )
     #expect(SwiftRestConfig.standard.debugLogging.isEnabled == false)
     #expect(SwiftRestConfig.standard.authRefresh.isEnabled == false)
-    #expect(SwiftRestVersion.current == "6.1.0")
+    #expect(SwiftRestVersion.current == "6.2.0")
 
     _ = try SwiftRestClient("https://api.example.com")
 }
